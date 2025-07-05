@@ -1,0 +1,5 @@
+.env
+
+# Postgre + Kafka volumes
+infra/postgres/pg-data/
+infra/kafka/kafka-data/
