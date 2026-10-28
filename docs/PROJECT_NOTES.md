@@ -1,11 +1,17 @@
 # Project notes (compacted from the planning conversation, 2026-10-28)
 
-Read this first when picking the project back up.
+Read this first when picking the project back up. Future work and priorities live in
+[ROADMAP.md](ROADMAP.md).
 
 ## Goal
-Full-fledged advertisement monitoring: scrape listing sites (SS.com first), detect new
-listings, notify users on Telegram / Discord / other platforms, simple dashboard,
-multi-user support. Backend in **Go**. Overengineering is a feature, not a bug.
+One multipurpose offer-monitoring platform: discover new classified ads and track price,
+discount, and availability changes on known offers. Examples: an Audi search, flats in Riga,
+or waiting for a particular Apple Watch to reach a target price. Shared dashboard, users,
+source adapters, storage, and notification delivery. Backend in **Go**.
+
+Minimize maintenance overhead: evolve this repo and reuse the existing pipeline rather
+than creating a separate application or bot for each website or watch type. Retail and
+price-change monitoring are planned, not implemented; see [ROADMAP.md](ROADMAP.md).
 
 ## Starting point
 The repo began as a docker-compose (Kafka KRaft + Postgres) with empty service folders; the
@@ -24,11 +30,10 @@ event-driven direction is the one we are building towards.
    - `internal/notifications`: `Notifier` interface, idempotent `Service`, one subpackage per channel (`discord`, later `telegram`).
    - `internal/subscriptions`: users, channels, searches, matching.
    - `internal/platform`: config, db/migrations runner, later kafka/otel/logging helpers.
-3. **Target runtime architecture (the overengineered part):** Kafka event bus with services
-   `scheduler -> scraper -> ingest (outbox) -> matcher -> notifier`, plus `api` and a dashboard
-   (htmx or SvelteKit). protobuf schemas, per-source rate limiting/circuit breakers/proxies,
-   DLQ + idempotency keys in notifier, OpenTelemetry/Prometheus/Loki, testcontainers, CI,
-   Helm later.
+3. **Runtime architecture:** Kafka event bus with services
+  `scraper -> ingest (outbox) -> matcher -> notifier`, plus `api` and a dashboard
+  (Vue 3 SPA with Bun, no SSR). Future scheduler and infrastructure work is tracked in
+  [ROADMAP.md](ROADMAP.md).
 4. **Database: sqlc + goose (not GORM).** goose manages migrations, sqlc generates typed query
    code from hand-written SQL. GORM's AutoMigrate is not a real migration manager and a model
    per table fights the slice layout. Each slice owns `migrations/` (goose files), `queries/`,
@@ -48,6 +53,8 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
 - **ss.com** (`internal/scraping/ss`): a feed is a category path below `/lv/` (`real-estate/flats/riga/centre/hand_over`,
   `transport/cars/audi/a4`). The parser is **header-driven** (reads column meaning from the page's header row; unknown
   layout = error, not guesswork). New category = new entries in `columns`.
+  Persisted source health and admin failure/recovery alerts are not implemented yet; they are
+  a required foundation in [ROADMAP.md](ROADMAP.md#required-foundation-source-health-and-admin-alerting).
 - **Scrape budget:** feeds are derived from users' searches, de-duplicated, and >`FEED_COLLAPSE_AT` siblings merge into the
   parent feed. Page 1 only, page 2+ only if all of page 1 was unseen. Global request gap, jitter, backoff on 403/429/5xx.
   Feeds are ordered by last bump, not ID, but a new ad always lands in the top rows (tested on saved pages).
@@ -59,6 +66,11 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
 - **Lifecycle:** `go run ./cmd/admin purge` deletes listings not *seen* for `RETENTION_HOURS` (last_seen, not first_seen, or a
   still-listed ad would be re-announced). Matches/deliveries are kept 2x longer. Cron it later.
 - **Services:** `cmd/{scraper,ingest,matcher,notifier,admin}` are thin; wiring lives in `internal/app` so tests run the real thing.
+- **Dashboard:** `web/` is a Vue 3 + TypeScript SPA using Bun and Vite. `cmd/api` serves a read-only
+  `GET /api/overview` endpoint on `127.0.0.1:8080`; `internal/dashboard` owns its cross-slice reporting queries.
+  Vite proxies API requests. No authentication yet: local access only. See README for startup commands.
+  The listings view has an All / Cars / Flats filter over the latest 100 loaded records. For now it derives
+  categories from ss.com category paths in `location`; unrecognized categories remain visible under All.
 
 ## Testing
 - `go test ./...` unit tests; slice tests need `TEST_DATABASE_URL` (skipped otherwise).
@@ -69,17 +81,16 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
 - `SS_LIVE=1 go test ./internal/scraping/ss -run TestLiveStructure` compares the saved pages' column headers with the live
   site (a few real requests). Run it when the scraper starts failing, or now and then.
 - `golangci-lint run ./...` and `golangci-lint fmt ./...` (config in `.golangci.yml`, includes depguard slice boundaries).
+- If a local Postgres bind mount makes root-wide commands fail with permission denied, use
+  `go test ./cmd/... ./internal/...`, `golangci-lint run ./cmd/... ./internal/...`, and
+  `golangci-lint fmt --diff ./cmd ./internal` to check all Go source without traversing database files.
+- Frontend checks: `cd web && bun run format:check && bun run build`. Apply formatting with
+  `bun run format`; Prettier is pinned in the frontend development dependencies.
 
 ## Not verified
 - Discord delivery against a real token and channel (the notifier is tested with a fake).
 - Telegram does not exist yet; it is one more `Notifier`.
 - `docker compose --profile app up` (the services in containers) builds an image but was not run end to end.
-
-## Next steps
-1. Real Discord token run; Telegram notifier.
-2. Purge on a schedule (cron/compose job); optional burst guard (digest if one search matches >N ads in a few minutes).
-3. `api` + dashboard slice; chat commands to edit searches.
-4. More sources (city24, vinted) behind `sources.Source`; protobuf schemas, DLQ, observability, CI.
 
 ## Running it
 ```sh

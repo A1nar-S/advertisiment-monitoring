@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --color-accent-50: #fff3ef;
+  --color-accent-100: #ffe4dc;
+  --color-accent-600: #b94b35;
+  --color-accent-700: #963c2b;
+}
+
+@layer base {
+  * {
+    letter-spacing: 0;
+  }
+  body {
+    @apply m-0 bg-zinc-50 font-sans text-sm text-zinc-900 antialiased;
+  }
+  button,
+  select {
+    @apply cursor-pointer;
+  }
+  button:disabled {
+    @apply cursor-default opacity-40;
+  }
+  button,
+  a,
+  input,
+  select {
+    @apply focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent-600;
+  }
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .icon-button {
+    @apply inline-flex size-8 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:hover:bg-transparent;
+  }
+  .button {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 shadow-xs transition-colors hover:bg-zinc-50;
+  }
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium;
+  }
+  .table-head {
+    @apply px-4 py-3 text-left text-xs font-medium text-zinc-500;
+  }
+  .table-cell {
+    @apply px-4 py-4 align-middle;
+  }
+}
+
+.empty-grid {
+  background-image:
+    linear-gradient(#e4e4e780 1px, transparent 1px),
+    linear-gradient(90deg, #e4e4e780 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse, black 5%, transparent 68%);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
