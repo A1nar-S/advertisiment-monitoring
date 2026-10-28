@@ -11,26 +11,117 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimOutbox = `-- name: ClaimOutbox :many
+SELECT id, payload FROM listings_outbox
+WHERE published_at IS NULL
+ORDER BY id
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+type ClaimOutboxRow struct {
+	ID      int64
+	Payload []byte
+}
+
+func (q *Queries) ClaimOutbox(ctx context.Context, batch int32) ([]ClaimOutboxRow, error) {
+	rows, err := q.db.Query(ctx, claimOutbox, batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimOutboxRow
+	for rows.Next() {
+		var i ClaimOutboxRow
+		if err := rows.Scan(&i.ID, &i.Payload); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertOutbox = `-- name: InsertOutbox :exec
+INSERT INTO listings_outbox (payload) VALUES ($1)
+`
+
+func (q *Queries) InsertOutbox(ctx context.Context, payload []byte) error {
+	_, err := q.db.Exec(ctx, insertOutbox, payload)
+	return err
+}
+
+const markOutboxPublished = `-- name: MarkOutboxPublished :exec
+UPDATE listings_outbox SET published_at = now() WHERE id = ANY($1::bigint[])
+`
+
+func (q *Queries) MarkOutboxPublished(ctx context.Context, ids []int64) error {
+	_, err := q.db.Exec(ctx, markOutboxPublished, ids)
+	return err
+}
+
+const purgePublishedOutbox = `-- name: PurgePublishedOutbox :execrows
+DELETE FROM listings_outbox
+WHERE published_at IS NOT NULL AND published_at < now() - make_interval(secs => $1::float8)
+`
+
+func (q *Queries) PurgePublishedOutbox(ctx context.Context, olderThanSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, purgePublishedOutbox, olderThanSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeStaleListings = `-- name: PurgeStaleListings :execrows
+DELETE FROM listings WHERE last_seen_at < now() - make_interval(secs => $1::float8)
+`
+
+// Keyed on last_seen_at, not first_seen_at: an ad that is still on a feed page
+// must stay known, or the next scrape would announce it as new again.
+func (q *Queries) PurgeStaleListings(ctx context.Context, olderThanSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeStaleListings, olderThanSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchFeed = `-- name: TouchFeed :one
+INSERT INTO feed_state (source, feed) VALUES ($1, $2)
+ON CONFLICT (source, feed) DO UPDATE SET source = EXCLUDED.source
+RETURNING EXTRACT(EPOCH FROM now() - first_seen_at)::float8 AS age_seconds
+`
+
+type TouchFeedParams struct {
+	Source string
+	Feed   string
+}
+
+// Registers a feed on first sight and returns how long ago that was, in
+// seconds. now() is the transaction start, so concurrent callers agree.
+func (q *Queries) TouchFeed(ctx context.Context, arg TouchFeedParams) (float64, error) {
+	row := q.db.QueryRow(ctx, touchFeed, arg.Source, arg.Feed)
+	var age_seconds float64
+	err := row.Scan(&age_seconds)
+	return age_seconds, err
+}
+
 const upsertListing = `-- name: UpsertListing :one
 INSERT INTO listings (
-    source, external_id, title, url, category, district, address,
-    rooms, area_m2, series, price, price_value, has_photo, image_url, posted_at
+    source, external_id, title, url, location, attrs, price, price_value, image_url, posted_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 ON CONFLICT (source, external_id) DO UPDATE SET
     title        = EXCLUDED.title,
     url          = EXCLUDED.url,
-    category     = EXCLUDED.category,
-    district     = EXCLUDED.district,
-    address      = EXCLUDED.address,
-    rooms        = EXCLUDED.rooms,
-    area_m2      = EXCLUDED.area_m2,
-    series       = EXCLUDED.series,
+    location     = EXCLUDED.location,
+    attrs        = EXCLUDED.attrs,
     price        = EXCLUDED.price,
     price_value  = EXCLUDED.price_value,
-    has_photo    = EXCLUDED.has_photo,
     image_url    = EXCLUDED.image_url,
     last_seen_at = now(),
     is_active    = TRUE
@@ -42,15 +133,10 @@ type UpsertListingParams struct {
 	ExternalID string
 	Title      string
 	Url        string
-	Category   string
-	District   string
-	Address    string
-	Rooms      *int32
-	AreaM2     *int32
-	Series     string
+	Location   string
+	Attrs      []byte
 	Price      string
 	PriceValue *float64
-	HasPhoto   bool
 	ImageUrl   string
 	PostedAt   pgtype.Timestamptz
 }
@@ -63,15 +149,10 @@ func (q *Queries) UpsertListing(ctx context.Context, arg UpsertListingParams) (b
 		arg.ExternalID,
 		arg.Title,
 		arg.Url,
-		arg.Category,
-		arg.District,
-		arg.Address,
-		arg.Rooms,
-		arg.AreaM2,
-		arg.Series,
+		arg.Location,
+		arg.Attrs,
 		arg.Price,
 		arg.PriceValue,
-		arg.HasPhoto,
 		arg.ImageUrl,
 		arg.PostedAt,
 	)

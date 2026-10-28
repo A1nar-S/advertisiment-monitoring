@@ -1,0 +1,38 @@
+# Copy to config/users.yaml (gitignored) and run `go run ./cmd/admin seed`;
+# the matcher also loads it on start (USERS_FILE). Re-running updates, it never
+# deletes: set `enabled: false` to retire a search.
+users:
+  - name: alice
+    channels:
+      - kind: discord
+        target: "123456789012345678" # Discord channel ID
+    searches:
+      - name: Centrs, 1-2 rooms
+        # A feed is an ss.com category path below /lv/. For real estate it ends
+        # in a deal: hand_over (rent out) | sell | buy | rent | exchange.
+        # Fewer distinct feeds = fewer requests to ss.com; many districts of one
+        # city are merged into the city-wide feed automatically.
+        feeds:
+          - real-estate/flats/riga/centre/hand_over
+          - real-estate/flats/riga/teika/hand_over
+        # Filters run locally on what the feeds return, so they cost no requests.
+        # {min, max} bounds a number, a list allows only those strings, and
+        # "price" is the listing price. Keys are the source's attributes (below).
+        filters:
+          price: {min: 250, max: 430}
+          rooms: {min: 1, max: 2}
+          area_m2: {min: 30}
+          series: [] # empty = any
+
+      - name: Audi A4, 2010+
+        feeds: [transport/cars/audi/a4]
+        filters:
+          price: {max: 8000}
+          year: {min: 2010}
+          mileage_km: {max: 250000}
+          fuel: [D]
+
+# Attributes ss.com provides, by category:
+#   flats: rooms, area_m2, floor, series, district, address
+#   cars:  year, engine_l, fuel (D diesel, H hybrid, ...), mileage_km, model
+# A listing that lacks an attribute fails only the filters that mention it.

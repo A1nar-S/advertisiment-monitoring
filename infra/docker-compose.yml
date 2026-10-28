@@ -1,22 +1,70 @@
+# `docker compose -f infra/docker-compose.yml up -d` starts only Postgres and
+# Kafka (for `go run ./cmd/...` on the host). `--profile app` adds the services.
+x-service: &service
+  build:
+    context: ..
+  restart: unless-stopped
+  profiles: [app]
+  env_file:
+    - path: ../.env
+      required: false
+  environment:
+    # Inside the compose network, not localhost.
+    DB_HOST: postgres
+    KAFKA_BROKERS: kafka:29092
+    USERS_FILE: /config/users.yaml
+  depends_on:
+    postgres: {condition: service_started}
+    kafka-init: {condition: service_completed_successfully}
+
 services:
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
     hostname: kafka
     ports:
-      - "9092:9092"
+      - "9092:9092" # EXTERNAL listener, for services run on the host
     environment:
       KAFKA_NODE_ID: ${KAFKA_NODE_ID}
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      # INTERNAL is what containers reach (advertised as kafka:29092); EXTERNAL
+      # is advertised as localhost so host-side tools work too.
       KAFKA_LISTENERS: ${KAFKA_LISTENERS}
       KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: ${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: ${KAFKA_CONTROLLER_LISTENER_NAMES}
       KAFKA_LOG_DIRS: ${KAFKA_LOG_DIRS}
       CLUSTER_ID: ${CLUSTER_ID}
+      # Single broker: the defaults of 3 would leave consumer groups unusable.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     volumes:
-      - ./kafka/kafka-data:/tmp/kraft-combined-logs
+      # The image runs as uid 1000. A bind mount, or a volume on a path the image
+      # lacks, is created root-owned and Kafka cannot write meta.properties there.
+      # A named volume on the image's own data dir inherits the right owner.
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:29092", "--list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Creates the topics with explicit partition counts (auto-creation would give 1).
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      kafka: {condition: service_healthy}
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        for t in listings.discovered listings.new notifications.requested; do
+          kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
 
   postgres:
     image: postgres:15
@@ -31,3 +79,19 @@ services:
     volumes:
       - ./postgres/pg-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  scraper:
+    <<: *service
+    build: {context: .., args: {CMD: scraper}}
+  ingest:
+    <<: *service
+    build: {context: .., args: {CMD: ingest}}
+  matcher:
+    <<: *service
+    build: {context: .., args: {CMD: matcher}}
+  notifier:
+    <<: *service
+    build: {context: .., args: {CMD: notifier}}
+
+volumes:
+  kafka-data:

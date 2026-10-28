@@ -5,7 +5,6 @@ package discord
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -14,40 +13,41 @@ import (
 
 const embedColor = 0x3fbc58
 
+// Notifier posts to any channel the bot can write to; the channel ID is
+// passed per call so one bot token serves every user.
 type Notifier struct {
-	session   *discordgo.Session
-	channelID string
+	session *discordgo.Session
 }
 
-func New(botToken, channelID string) (*Notifier, error) {
+func New(botToken string) (*Notifier, error) {
 	s, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return nil, fmt.Errorf("discord session: %w", err)
 	}
-	return &Notifier{session: s, channelID: channelID}, nil
+	return &Notifier{session: s}, nil
 }
 
-func (n *Notifier) Name() string { return "discord" }
+func (n *Notifier) Kind() string { return "discord" }
 
-func (n *Notifier) NotifyText(ctx context.Context, msg string) error {
-	_, err := n.session.ChannelMessageSend(n.channelID, msg, discordgo.WithContext(ctx))
+func (n *Notifier) NotifyText(ctx context.Context, channelID, msg string) error {
+	_, err := n.session.ChannelMessageSend(channelID, msg, discordgo.WithContext(ctx))
 	return err
 }
 
-func (n *Notifier) NotifyListing(ctx context.Context, l events.ListingDiscovered) error {
-	_, err := n.session.ChannelMessageSendEmbed(n.channelID, embed(l), discordgo.WithContext(ctx))
+func (n *Notifier) NotifyListing(ctx context.Context, channelID string, l events.ListingDiscovered) error {
+	_, err := n.session.ChannelMessageSendEmbed(channelID, embed(l), discordgo.WithContext(ctx))
 	return err
 }
 
+// embed renders a listing without knowing the source: the source decided which
+// facts (Fields) are worth showing, in which order.
 func embed(l events.ListingDiscovered) *discordgo.MessageEmbed {
 	e := &discordgo.MessageEmbed{
-		Title: "🏠 New Advertisement",
+		Title: "🆕 New listing",
 		Color: embedColor,
 	}
 
-	if l.Title != "" {
-		e.Description = l.Title
-	}
+	e.Description = l.Title
 	if l.URL != "" {
 		if e.Description != "" {
 			e.Description += "\n"
@@ -55,23 +55,11 @@ func embed(l events.ListingDiscovered) *discordgo.MessageEmbed {
 		e.Description += fmt.Sprintf("[📎 View on %s](%s)", l.Source, l.URL)
 	}
 
-	add := func(name, value string, inline bool) {
-		e.Fields = append(e.Fields, &discordgo.MessageEmbedField{Name: name, Value: value, Inline: inline})
-	}
-	if l.Category != "" {
-		add("📍 Location", l.Category, false)
-	}
 	if l.Price != "" {
-		add("💰 Price", l.Price, true)
+		e.Fields = append(e.Fields, &discordgo.MessageEmbedField{Name: "💰 Price", Value: l.Price, Inline: true})
 	}
-	if l.Rooms != nil && *l.Rooms != 0 {
-		add("🚪 Rooms", strconv.Itoa(*l.Rooms), true)
-	}
-	if l.AreaM2 != nil && *l.AreaM2 != 0 {
-		add("📐 Area", fmt.Sprintf("%d m²", *l.AreaM2), true)
-	}
-	if l.Series != "" {
-		add("🏢 Series", l.Series, true)
+	for _, f := range l.Fields {
+		e.Fields = append(e.Fields, &discordgo.MessageEmbedField{Name: f.Name, Value: f.Value, Inline: f.Inline})
 	}
 	if l.ImageURL != "" {
 		e.Image = &discordgo.MessageEmbedImage{URL: l.ImageURL}

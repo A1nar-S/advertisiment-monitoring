@@ -8,24 +8,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type FeedState struct {
+	Source      string
+	Feed        string
+	FirstSeenAt pgtype.Timestamptz
+}
+
 type Listing struct {
 	ID          int64
 	Source      string
 	ExternalID  string
 	Title       string
 	Url         string
-	Category    string
-	District    string
-	Address     string
-	Rooms       *int32
-	AreaM2      *int32
-	Series      string
 	Price       string
 	PriceValue  *float64
-	HasPhoto    bool
 	ImageUrl    string
 	PostedAt    pgtype.Timestamptz
 	FirstSeenAt pgtype.Timestamptz
 	LastSeenAt  pgtype.Timestamptz
 	IsActive    bool
+	Location    string
+	Attrs       []byte
+}
+
+type ListingsOutbox struct {
+	ID          int64
+	Payload     []byte
+	CreatedAt   pgtype.Timestamptz
+	PublishedAt pgtype.Timestamptz
 }

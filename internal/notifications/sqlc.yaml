@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations # goose files; sqlc ignores the Down sections
+    queries: queries
+    gen:
+      go:
+        package: notificationsdb
+        out: notificationsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: pg_catalog.numeric
+            nullable: true
+            go_type:
+              type: float64
+              pointer: true
