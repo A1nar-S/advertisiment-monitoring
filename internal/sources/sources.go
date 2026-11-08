@@ -6,6 +6,7 @@ package sources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -30,6 +31,31 @@ type Source interface {
 	// It is needed because a planned feed can be broader than any one search.
 	InScope(wanted []string, l events.ListingDiscovered) bool
 }
+
+// SearchNormalizer is optionally implemented by a source whose searches use
+// its own vocabulary (ss.com: the search form's field and option names). It
+// validates a search as written in the users file and returns its feeds and
+// filters in canonical form; some filters (a flat's region) may become feeds.
+// Unknown keys or values are errors, with suggestions, so a typo fails at
+// startup instead of silently matching nothing.
+type SearchNormalizer interface {
+	NormalizeSearch(feeds []string, filters map[string]any) ([]string, map[string]any, error)
+}
+
+// Enricher is optionally implemented by a source whose feed pages lack some
+// facts that its ad pages have (ss.com cars: gearbox, body, color, ...).
+// The matcher calls Enrich only for a listing that passes every filter it can
+// check without them, and at most once per listing, whoever is watching.
+type Enricher interface {
+	// EnrichableKeys are the attrs Enrich can add.
+	EnrichableKeys() []string
+	// Enrich reads the ad page and returns the listing with those attrs
+	// added. ErrGone means the ad no longer exists.
+	Enrich(ctx context.Context, l events.ListingDiscovered) (events.ListingDiscovered, error)
+}
+
+// ErrGone is returned by Enrich for an ad that was removed meanwhile.
+var ErrGone = errors.New("listing no longer exists")
 
 // Registry holds the sources a process knows about.
 type Registry map[string]Source

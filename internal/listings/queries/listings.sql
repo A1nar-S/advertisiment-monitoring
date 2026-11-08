@@ -46,3 +46,11 @@ DELETE FROM listings WHERE last_seen_at < now() - make_interval(secs => @older_t
 -- name: PurgePublishedOutbox :execrows
 DELETE FROM listings_outbox
 WHERE published_at IS NOT NULL AND published_at < now() - make_interval(secs => @older_than_seconds::float8);
+
+-- name: KnownIDs :many
+-- Which of these ads are already stored. The scraper uses it to see where the
+-- ads it saw before begin, also right after a restart.
+SELECT external_id FROM listings WHERE source = @source AND external_id = ANY(@ids::text[]);
+
+-- name: FeedSeen :one
+SELECT EXISTS (SELECT 1 FROM feed_state WHERE source = @source AND feed = @feed) AS seen;

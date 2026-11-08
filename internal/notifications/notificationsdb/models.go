@@ -11,4 +11,17 @@ import (
 type Delivery struct {
 	Key         string
 	DeliveredAt pgtype.Timestamptz
+	UserID      *int64
+	SearchName  *string
+	Digested    bool
+}
+
+type DigestQueue struct {
+	Key           string
+	UserID        int64
+	SearchName    string
+	ChannelKind   string
+	ChannelTarget string
+	Listing       []byte
+	QueuedAt      pgtype.Timestamptz
 }

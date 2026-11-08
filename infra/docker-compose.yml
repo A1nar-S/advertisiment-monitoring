@@ -1,5 +1,9 @@
-# `docker compose -f infra/docker-compose.yml up -d` starts only Postgres and
-# Kafka (for `go run ./cmd/...` on the host). `--profile app` adds the services.
+# One env file for everything: the repo-root .env (see .env.example).
+#
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d                      # Postgres + Kafka only
+#   docker compose --env-file .env -f infra/docker-compose.yml --profile app up -d --build # + the services
+#
+# `make up` / `make infra` in the repo root run exactly these.
 x-service: &service
   build:
     context: ..
@@ -11,10 +15,15 @@ x-service: &service
   environment:
     # Inside the compose network, not localhost.
     DB_HOST: postgres
+    DB_PORT: "5432"
     KAFKA_BROKERS: kafka:29092
     USERS_FILE: /config/users.yaml
+  volumes:
+    # users.yaml is gitignored and kept out of the image; edit it on the host
+    # and `make reload-users`.
+    - ../config:/config:ro
   depends_on:
-    postgres: {condition: service_started}
+    postgres: {condition: service_healthy}
     kafka-init: {condition: service_completed_successfully}
 
 services:
@@ -22,26 +31,29 @@ services:
     image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
     hostname: kafka
+    restart: unless-stopped
     ports:
-      - "9092:9092" # EXTERNAL listener, for services run on the host
+      - "127.0.0.1:9092:9092" # EXTERNAL listener, for services run on the host
     environment:
-      KAFKA_NODE_ID: ${KAFKA_NODE_ID}
+      KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       # INTERNAL is what containers reach (advertised as kafka:29092); EXTERNAL
       # is advertised as localhost so host-side tools work too.
-      KAFKA_LISTENERS: ${KAFKA_LISTENERS}
-      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: ${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}
+      KAFKA_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_CONTROLLER_LISTENER_NAMES: ${KAFKA_CONTROLLER_LISTENER_NAMES}
-      KAFKA_LOG_DIRS: ${KAFKA_LOG_DIRS}
-      CLUSTER_ID: ${CLUSTER_ID}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: QmZ1MHJhQW5JaUNkWHlWZQ==
       # Single broker: the defaults of 3 would leave consumer groups unusable.
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Plenty for a laptop; the default heap is sized for a server.
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     volumes:
       # The image runs as uid 1000. A bind mount, or a volume on a path the image
       # lacks, is created root-owned and Kafka cannot write meta.properties there.
@@ -69,16 +81,22 @@ services:
   postgres:
     image: postgres:15
     container_name: postgres
-    restart: always
+    restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env (make env)}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env (make env)}
+      POSTGRES_DB: ${DB_NAME:-ads_monitor}
     volumes:
-      - ./postgres/pg-data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Named volume: a bind mount ends up root-owned on Linux and breaks
+      # `go test ./...` / builds that walk the repo.
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
 
   scraper:
     <<: *service
@@ -92,6 +110,15 @@ services:
   notifier:
     <<: *service
     build: {context: .., args: {CMD: notifier}}
+  # One-off maintenance: `make purge`, or `... --profile tools run --rm admin seed`.
+  admin:
+    <<: *service
+    profiles: [tools]
+    restart: "no"
+    build: {context: .., args: {CMD: admin}}
+    depends_on:
+      postgres: {condition: service_healthy}
 
 volumes:
   kafka-data:
+  pg-data:

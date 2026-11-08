@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -186,5 +187,145 @@ users:
 	}
 	if err := svc.SeedFromFile(ctx, bad); err == nil {
 		t.Error("expected an error for an unknown source")
+	}
+}
+
+func TestEvaluateWithDetail(t *testing.T) {
+	l := events.ListingDiscovered{Location: "cars", PriceValue: ptr(5000.0), Attrs: map[string]any{"year": 2015.0}}
+	enrichable := map[string]bool{"gearbox": true, "equipment": true}
+	s := Search{Feeds: []string{"cars"}, Filters: Filters{
+		Ranges: map[string]Range{"year": {Min: ptr(2012.0)}},
+		OneOf:  map[string][]string{"gearbox": {"Automāts"}},
+	}}
+	if v := s.Evaluate(fakeSource{}, l, enrichable); v != NeedsDetail {
+		t.Errorf("cheap filters pass, gearbox unknown: %v, want NeedsDetail", v)
+	}
+	// A cheap filter that already fails never asks for the ad page.
+	l.Attrs["year"] = 2005.0
+	if v := s.Evaluate(fakeSource{}, l, enrichable); v != NoMatch {
+		t.Errorf("year fails: %v, want NoMatch", v)
+	}
+	// Without enrichment a missing attr simply fails.
+	l.Attrs["year"] = 2015.0
+	if s.Match(fakeSource{}, l) {
+		t.Error("Match without the ad page should fail on unknown gearbox")
+	}
+	l.Attrs["gearbox"] = "automāts"
+	if v := s.Evaluate(fakeSource{}, l, enrichable); v != Matched {
+		t.Errorf("gearbox known: %v, want Matched", v)
+	}
+
+	// Equipment must contain every required item; JSON gives []any.
+	s.Filters.AllOf = map[string][]string{"equipment": {"ABS", "Kondicionieris"}}
+	l.Attrs["equipment"] = []any{"ABS", "Kondicionieris", "ESP"}
+	if !s.Match(fakeSource{}, l) {
+		t.Error("equipment superset should match")
+	}
+	l.Attrs["equipment"] = []any{"ABS"}
+	if s.Match(fakeSource{}, l) {
+		t.Error("missing equipment item should fail")
+	}
+}
+
+func TestParseFiltersAll(t *testing.T) {
+	f, err := parseFilters(map[string]any{"equipment": map[string]any{"all": []any{"ABS", "ESP"}}})
+	if err != nil || !reflect.DeepEqual(f.AllOf, map[string][]string{"equipment": {"ABS", "ESP"}}) {
+		t.Errorf("got %+v, %v", f, err)
+	}
+}
+
+// enrichingSource reads "ad pages" by counting calls.
+type enrichingSource struct {
+	fakeSource
+	calls int
+	err   error
+}
+
+func (*enrichingSource) EnrichableKeys() []string { return []string{"gearbox"} }
+func (e *enrichingSource) Enrich(_ context.Context, l events.ListingDiscovered) (events.ListingDiscovered, error) {
+	e.calls++
+	if e.err != nil {
+		return l, e.err
+	}
+	out := l
+	out.Attrs = maps(l.Attrs)
+	out.Attrs["gearbox"] = "Automāts"
+	return out, nil
+}
+
+func TestNotificationsEnrichOnce(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS matches, searches, channels, users, subscriptions_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	src := &enrichingSource{}
+	svc := NewService(pool, sources.NewRegistry(src), 3)
+	if err := svc.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(t.TempDir(), "users.yaml")
+	// Two users, three searches; two need the gearbox, one also wants manual.
+	if err := os.WriteFile(seed, []byte(`
+users:
+  - name: alice
+    channels: [{kind: discord, target: "111"}]
+    searches:
+      - {name: auto, feeds: [cars], filters: {gearbox: [Automāts]}}
+      - {name: cheap, feeds: [cars], filters: {price: {max: 6000}}}
+  - name: bob
+    channels: [{kind: discord, target: "222"}]
+    searches:
+      - {name: auto-or-manual, feeds: [cars], filters: {gearbox: [Automāts, Manuāla], year: {min: 2010}}}
+      - {name: manual, feeds: [cars], filters: {gearbox: [Manuāla]}}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SeedFromFile(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	l := events.ListingDiscovered{Source: "ss.com", ExternalID: "7", Location: "cars", PriceValue: ptr(5000.0), Attrs: map[string]any{"year": 2015.0}}
+	got, err := svc.Notifications(ctx, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, n := range got {
+		names = append(names, n.SearchName)
+		if v, _ := n.Listing.Str("gearbox"); v != "Automāts" {
+			t.Errorf("%s: notification lacks the enriched gearbox", n.SearchName)
+		}
+	}
+	slices.Sort(names)
+	if !reflect.DeepEqual(names, []string{"auto", "auto-or-manual", "cheap"}) || src.calls != 1 {
+		t.Errorf("matched %v with %d ad-page reads, want 3 searches and 1 read", names, src.calls)
+	}
+
+	// The ad page failing: candidates still hear about it, flagged.
+	src.err = errors.New("403")
+	l.ExternalID = "8"
+	got, err = svc.Notifications(ctx, l)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("unconfirmed: %d notifications, err %v; want all 4", len(got), err)
+	}
+	if f := got[len(got)-1].Listing.Fields; len(f) == 0 || !strings.Contains(f[len(f)-1].Value, "gearbox") {
+		t.Errorf("unconfirmed listing not flagged: %+v", f)
+	}
+
+	// A removed ad matches nothing that needed its page.
+	src.err = sources.ErrGone
+	l.ExternalID = "9"
+	got, _ = svc.Notifications(ctx, l)
+	if len(got) != 1 || got[0].SearchName != "cheap" {
+		t.Errorf("gone: %+v, want only the cheap search", got)
 	}
 }

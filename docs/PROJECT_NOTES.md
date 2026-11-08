@@ -50,21 +50,43 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
   `InScope` (does an ad belong to a search's feeds). `internal/events.ListingDiscovered` is source-neutral: common
   fields plus `Attrs` (filterable facts) and `Fields` (what to display). Register a new site in `internal/app/sources.go`.
   Searches filter generically on `Attrs` keys (`{min,max}` ranges, string sets, `price`), so cars/vinted need no core change.
-- **ss.com** (`internal/scraping/ss`): a feed is a category path below `/lv/` (`real-estate/flats/riga/centre/hand_over`,
-  `transport/cars/audi/a4`). The parser is **header-driven** (reads column meaning from the page's header row; unknown
-  layout = error, not guesswork). New category = new entries in `columns`.
+- **ss.com** (`internal/scraping/ss`): a feed is a category path below `/lv/` (`transport/cars`,
+  `real-estate/flats/riga/centre/hand_over`). The parser is **header-driven** (reads column meaning from the page's header
+  row; unknown layout = error, not guesswork). New category = new entries in `columns`.
+- **Codebooks** (`internal/scraping/ss/codebook/{cars,flats}.json`, embedded): ss.com's own search-form vocabulary
+  (field IDs, option names, makes→models, regions→districts with URL slugs). Searches are written in these names and
+  validated at seed time (`sources.SearchNormalizer`: unknown names fail with "did you mean"). Parsed attrs use the same
+  names, and ad pages are read through the same field IDs (`td#tdo_<id>`). A checked-in snapshot rather than a DB table:
+  versioned, offline, reviewable diffs. Refresh with `go run ./cmd/admin ss-codebook` (~85 requests). A DB table becomes
+  worthwhile when the dashboard edits searches.
+- **Cars = one shared feed.** Every car search uses `feeds: [transport/cars]` (~1000 new ads/day, about 3.5 per 5 min), so one
+  request per cycle serves all users. Filters on list columns are free (make, model, year, engine, fuel, mileage, price).
+  Ad-page-only fields (gearbox, body, color, inspection, equipment; flats: house type) are read **lazily by the matcher**
+  (`sources.Enricher`): only for a new ad that passes every cheap filter of some search, at most once per ad, shared by all
+  searches. If the ad page fails, candidates get the alert flagged "⚠️ Unconfirmed" rather than nothing; a removed ad
+  matches nothing. ss.com's own server search was rejected: it is POST + session, 2 requests per search per cycle.
+- **Flats:** `feeds: [real-estate/flats]` + `region`/`district`/`deal` compile into feed paths (shared by everyone watching
+  the area); the rest are local filters. Full feed paths still work as before.
   Persisted source health and admin failure/recovery alerts are not implemented yet; they are
-  a required foundation in [ROADMAP.md](ROADMAP.md#required-foundation-source-health-and-admin-alerting).
-- **Scrape budget:** feeds are derived from users' searches, de-duplicated, and >`FEED_COLLAPSE_AT` siblings merge into the
-  parent feed. Page 1 only, page 2+ only if all of page 1 was unseen. Global request gap, jitter, backoff on 403/429/5xx.
-  Feeds are ordered by last bump, not ID, but a new ad always lands in the top rows (tested on saved pages).
+  a required foundation in [ROADMAP.md](ROADMAP.md#monitoring-required-for-scraping).
+- **Scrape budget and paging:** feeds are derived from users' searches, de-duplicated, and >`FEED_COLLAPSE_AT` siblings
+  merge into the parent feed. Feeds are ordered by last bump, not ID, so a known row at the *top* means nothing (it was
+  bumped). The runner fetches the next page until the **last 2 rows** of a page are both known, up to `MAX_PAGES` (5). "Seen" is
+  the listings table plus the previous cycle in memory, so a restart catches up on downtime. A feed's first-ever scrape
+  is page 1 only (it is stored silently anyway). Hitting `MAX_PAGES` without reaching known rows sends one admin alert
+  ("feed busier than N pages") and halves the wait until it catches up. Global request gap, jitter, backoff on
+  403/429/5xx; with no feeds yet it re-checks every minute.
 - **No spam on first start:** a feed's first scrape (`feed_state`, `SEED_WINDOW_SECONDS`) is stored silently, for any new
   feed, including one added by a new search later. Cost: a genuinely new ad inside that window is not announced.
-  Ads that appear while the scraper is down *are* announced on restart (up to the 30 on page 1).
+  A new search on an already watched feed (all car searches) never back-announces: the matcher sees only new ads.
+- **Flood guard** (`internal/notifications`): at most `NOTIFY_BURST` (5) ad messages per (user, search) per
+  `NOTIFY_BURST_WINDOW_MINUTES` (10); the rest wait in `digest_queue` and go out as one digest per search when the window
+  ends. Covers catch-up after downtime, broad searches and bugs alike. Operational texts are never limited.
 - **Delivery:** at-least-once; dedup by DB keys (`listings` unique, `matches`, `deliveries` idempotency key).
   Matches are recorded after publishing, so a crash re-publishes rather than loses; the notifier dedups.
-- **Lifecycle:** `go run ./cmd/admin purge` deletes listings not *seen* for `RETENTION_HOURS` (last_seen, not first_seen, or a
-  still-listed ad would be re-announced). Matches/deliveries are kept 2x longer. Cron it later.
+- **Lifecycle:** `make purge` / `go run ./cmd/admin purge` deletes listings not *seen* for `RETENTION_HOURS` (default 60
+  days). The listings table doubles as the "already announced" memory: a shorter retention re-announces old ads when they
+  are bumped. Matches/deliveries are kept 2x longer. Cron it weekly.
 - **Services:** `cmd/{scraper,ingest,matcher,notifier,admin}` are thin; wiring lives in `internal/app` so tests run the real thing.
 - **Dashboard:** `web/` is a Vue 3 + TypeScript SPA using Bun and Vite. `cmd/api` serves a read-only
   `GET /api/overview` endpoint on `127.0.0.1:8080`; `internal/dashboard` owns its cross-slice reporting queries.
@@ -76,31 +98,34 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
 - `go test ./...` unit tests; slice tests need `TEST_DATABASE_URL` (skipped otherwise).
 - `go test -tags integration ./internal/app` runs scraper+ingest+matcher+notifier against real Postgres and Kafka
   (testcontainers, needs Docker) with a fake ss.com and fake Discord. It covers silent prefill, exactly-once
-  notification, scraper restart, a new feed added while running, feed collapsing, and flats + cars. Set
+  notification, scraper restart, a new feed added while running, feed collapsing, and flats + cars. `TestCarsPipeline`
+  covers the shared cars feed: ad pages read only for candidates, and a restart while 45 bump-ordered ads land on two
+  pages (all announced exactly once, 5 singly and the rest in a digest). Set
   `TEST_DATABASE_URL` + `TEST_KAFKA_BROKERS` to use servers you already run.
 - `SS_LIVE=1 go test ./internal/scraping/ss -run TestLiveStructure` compares the saved pages' column headers with the live
   site (a few real requests). Run it when the scraper starts failing, or now and then.
 - `golangci-lint run ./...` and `golangci-lint fmt ./...` (config in `.golangci.yml`, includes depguard slice boundaries).
-- If a local Postgres bind mount makes root-wide commands fail with permission denied, use
-  `go test ./cmd/... ./internal/...`, `golangci-lint run ./cmd/... ./internal/...`, and
-  `golangci-lint fmt --diff ./cmd ./internal` to check all Go source without traversing database files.
+- golangci-lint must be built with Go ≥ 1.26 (older release images refuse the module); `go install
+  github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` works.
+- Postgres data now lives in the named volume `pg-data` (it used to be a root-owned bind mount under `infra/postgres`).
 - Frontend checks: `cd web && bun run format:check && bun run build`. Apply formatting with
   `bun run format`; Prettier is pinned in the frontend development dependencies.
 
 ## Not verified
-- Discord delivery against a real token and channel (the notifier is tested with a fake).
+- Discord delivery against a real token and channel (the notifier is tested with a fake). The full Docker stack
+  (`make up`) was run end to end up to the notifier on 2026-11-08; the notifier waits for a real `DISCORD_BOT_TOKEN`.
 - Telegram does not exist yet; it is one more `Notifier`.
-- `docker compose --profile app up` (the services in containers) builds an image but was not run end to end.
 
 ## Running it
+See the README ("Run it"). In short:
 ```sh
-cp .env.example .env && cp infra/.env.example infra/.env     # fill in; DB_* must match POSTGRES_* ; set KAFKA_LOG_DIRS=/var/lib/kafka/data
-cp config/users.example.yaml config/users.yaml               # who watches what
-docker compose -f infra/docker-compose.yml up -d             # postgres, kafka, topics
-go run ./cmd/ingest & go run ./cmd/matcher & go run ./cmd/notifier & go run ./cmd/scraper
-# or everything in containers: docker compose -f infra/docker-compose.yml --profile app up -d --build
-go run ./cmd/admin purge            # lifecycle; also: admin seed | admin migrate
-go generate ./...                   # after changing a slice's migrations/ or queries/
+make env && make users          # .env (random DB password) and config/users.yaml; then fill in Discord values
+make check-users                # validate searches against the codebooks
+make up                         # Postgres, Kafka, topics, scraper, ingest, matcher, notifier (all in Docker)
+make logs | make reload-users | make purge | make down
+# Services on the host instead: make infra, then go run ./cmd/ingest & ./cmd/matcher & ./cmd/notifier & ./cmd/scraper
+go run ./cmd/admin ss-codebook  # refresh the ss.com codebooks
+go generate ./...               # after changing a slice's migrations/ or queries/
 ```
 Note: `go.mod` is on Go 1.26 (sqlc v1.31 requires it); an older local Go auto-downloads the toolchain.
 Kafka's data is a named volume (`kafka-data`): the image runs as uid 1000 and a bind mount is created root-owned.

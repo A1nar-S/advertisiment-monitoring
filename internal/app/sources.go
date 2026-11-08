@@ -9,9 +9,11 @@ import (
 
 // KnownSources is the one place a new site is registered. A source with no
 // searches watching it costs nothing: the scraper finds no feeds and idles.
-func KnownSources(requestTimeout time.Duration) sources.Registry {
+// gap spaces out the requests a source makes outside the scraper's paced
+// feed loop: the ad pages the matcher reads.
+func KnownSources(requestTimeout, gap time.Duration) sources.Registry {
 	return sources.NewRegistry(
-		ss.NewClient(requestTimeout),
+		ss.NewClient(requestTimeout).WithGap(gap),
 		// city24.NewClient(...), vinted.NewClient(...)
 	)
 }

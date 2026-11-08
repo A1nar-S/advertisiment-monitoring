@@ -131,6 +131,24 @@ func (s *Service) RelayOutbox(ctx context.Context, batch int32, publish func(con
 	return published, err
 }
 
+// KnownIDs reports which of ids are already stored for source.
+func (s *Service) KnownIDs(ctx context.Context, source string, ids []string) (map[string]bool, error) {
+	rows, err := s.q.KnownIDs(ctx, listingsdb.KnownIDsParams{Source: source, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]bool, len(rows))
+	for _, id := range rows {
+		known[id] = true
+	}
+	return known, nil
+}
+
+// FeedSeen reports whether feed was ever ingested.
+func (s *Service) FeedSeen(ctx context.Context, source, feed string) (bool, error) {
+	return s.q.FeedSeen(ctx, listingsdb.FeedSeenParams{Source: source, Feed: feed})
+}
+
 // Purge deletes listings not seen on any feed for olderThan, and published
 // outbox entries older than a day.
 func (s *Service) Purge(ctx context.Context, olderThan time.Duration) (int64, error) {

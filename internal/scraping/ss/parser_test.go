@@ -34,7 +34,8 @@ func TestParseFixtures(t *testing.T) {
 		{"testdata/feed_district.html", "real-estate/flats/riga/", []string{"address", "rooms", "area_m2", "series", "floor"}},
 		{"testdata/feed_city.html", "real-estate/flats/riga/", []string{"address", "rooms", "area_m2", "series", "floor"}},
 		{"testdata/feed_cars_model.html", "transport/cars/audi/a4", []string{"year", "engine_l"}},
-		{"testdata/feed_cars_make.html", "transport/cars/audi/", []string{"model", "year", "engine_l"}},
+		{"testdata/feed_cars_make.html", "transport/cars/audi/", []string{"make", "model", "year", "engine_l"}},
+		{"testdata/feed_cars_all.html", "transport/cars/", []string{"make", "model", "year"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -75,7 +76,7 @@ func TestParseDistrictFeedColumns(t *testing.T) {
 	if a.ExternalID != "58230432" || a.Location != "real-estate/flats/riga/centre" {
 		t.Errorf("id/location = %q / %q", a.ExternalID, a.Location)
 	}
-	want := map[string]any{"address": "Sadovņikova 22", "rooms": 2.0, "area_m2": 35.0, "floor": "2/4", "series": "Jaun."}
+	want := map[string]any{"address": "Sadovņikova 22", "rooms": 2.0, "area_m2": 35.0, "floor": 2.0, "floors": 4.0, "series": "Jaun."}
 	if !reflect.DeepEqual(a.Attrs, want) {
 		t.Errorf("attrs = %v, want %v", a.Attrs, want)
 	}
@@ -87,7 +88,7 @@ func TestParseDistrictFeedColumns(t *testing.T) {
 func TestParseCityFeedColumns(t *testing.T) {
 	a := parseFile(t, "testdata/feed_city.html")[0]
 	want := map[string]any{
-		"district": "Pļavnieki", "address": "J. Vācieša 2G", "rooms": 3.0, "area_m2": 70.0, "floor": "8/16", "series": "Specpr.",
+		"district": "Pļavnieki", "address": "J. Vācieša 2G", "rooms": 3.0, "area_m2": 70.0, "floor": 8.0, "floors": 16.0, "series": "Specpr.",
 	}
 	if a.Location != "real-estate/flats/riga/plyavnieki" || !reflect.DeepEqual(a.Attrs, want) {
 		t.Errorf("location = %q, attrs = %v, want %v", a.Location, a.Attrs, want)
@@ -103,7 +104,7 @@ func TestParseCarColumns(t *testing.T) {
 		t.Errorf("location = %q", a.Location)
 	}
 	// First row of the fixture: 2012, 3.0D, "250 tūkst.", "6,900 €".
-	want := map[string]any{"year": 2012.0, "engine_l": 3.0, "fuel": "D", "mileage_km": 250000.0}
+	want := map[string]any{"make": "Audi", "model": "A4", "year": 2012.0, "engine_l": 3.0, "fuel": "Dīzelis", "mileage_km": 250000.0}
 	if !reflect.DeepEqual(a.Attrs, want) {
 		t.Errorf("attrs = %v, want %v", a.Attrs, want)
 	}
@@ -210,5 +211,29 @@ func TestInScope(t *testing.T) {
 				t.Errorf("InScope = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// The all-makes feed puts make and model in one "Marka" cell ("Opel<br>Zafira").
+func TestParseAllCarsFeed(t *testing.T) {
+	ads := parseFile(t, "testdata/feed_cars_all.html")
+	a := ads[0]
+	want := map[string]any{"make": "Opel", "model": "Zafira", "year": 2005.0, "engine_l": 2.2, "fuel": "Benzīns", "mileage_km": 394000.0}
+	if !reflect.DeepEqual(a.Attrs, want) {
+		t.Errorf("attrs = %v, want %v", a.Attrs, want)
+	}
+	if a.Location != "transport/cars/opel/zafira" || a.PriceValue == nil || *a.PriceValue != 1350 {
+		t.Errorf("location %q price %v", a.Location, a.PriceValue)
+	}
+	fuels := map[string]int{}
+	for _, l := range ads {
+		f, _ := l.Str("fuel")
+		fuels[f]++
+	}
+	if fuels["Dīzelis"] == 0 || fuels["Benzīns"] == 0 {
+		t.Errorf("fuel spread %v: suffix mapping broken?", fuels)
+	}
+	if len(a.Fields) == 0 || a.Fields[0].Value != "Opel Zafira" {
+		t.Errorf("fields = %+v", a.Fields)
 	}
 }

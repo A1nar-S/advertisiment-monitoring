@@ -44,6 +44,22 @@ func (q *Queries) ClaimOutbox(ctx context.Context, batch int32) ([]ClaimOutboxRo
 	return items, nil
 }
 
+const feedSeen = `-- name: FeedSeen :one
+SELECT EXISTS (SELECT 1 FROM feed_state WHERE source = $1 AND feed = $2) AS seen
+`
+
+type FeedSeenParams struct {
+	Source string
+	Feed   string
+}
+
+func (q *Queries) FeedSeen(ctx context.Context, arg FeedSeenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, feedSeen, arg.Source, arg.Feed)
+	var seen bool
+	err := row.Scan(&seen)
+	return seen, err
+}
+
 const insertOutbox = `-- name: InsertOutbox :exec
 INSERT INTO listings_outbox (payload) VALUES ($1)
 `
@@ -51,6 +67,37 @@ INSERT INTO listings_outbox (payload) VALUES ($1)
 func (q *Queries) InsertOutbox(ctx context.Context, payload []byte) error {
 	_, err := q.db.Exec(ctx, insertOutbox, payload)
 	return err
+}
+
+const knownIDs = `-- name: KnownIDs :many
+SELECT external_id FROM listings WHERE source = $1 AND external_id = ANY($2::text[])
+`
+
+type KnownIDsParams struct {
+	Source string
+	Ids    []string
+}
+
+// Which of these ads are already stored. The scraper uses it to see where the
+// ads it saw before begin, also right after a restart.
+func (q *Queries) KnownIDs(ctx context.Context, arg KnownIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, knownIDs, arg.Source, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var external_id string
+		if err := rows.Scan(&external_id); err != nil {
+			return nil, err
+		}
+		items = append(items, external_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markOutboxPublished = `-- name: MarkOutboxPublished :exec

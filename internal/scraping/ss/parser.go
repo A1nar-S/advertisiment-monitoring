@@ -40,7 +40,7 @@ type column func(a *ad, cell *goquery.Selection)
 type ad struct {
 	events.ListingDiscovered
 	district, address string
-	model             string
+	make, model       string
 }
 
 var columns = map[string]column{
@@ -51,11 +51,20 @@ var columns = map[string]column{
 	"Rajons":  func(a *ad, c *goquery.Selection) { a.district, a.address = splitDistrict(c) },
 	"Ist.":    num("rooms"),
 	"m²":      num("area_m2"),
-	"Stāvs":   str("floor"),
+	"Stāvs":   floor, // "2/4": floor 2 of 4
 	"Sērija":  str("series"),
 
-	// Cars.
-	"Marka":      func(a *ad, c *goquery.Selection) { a.model = text(c) },
+	// Cars. On the all-makes feed "Marka" is "Opel<br>Zafira"; on a make's
+	// feed "Modelis" is just the model; a model's feed has neither.
+	"Marka": func(a *ad, c *goquery.Selection) {
+		switch parts := splitLines(c); len(parts) {
+		case 0:
+		case 1:
+			a.make = parts[0]
+		default:
+			a.make, a.model = parts[0], strings.Join(parts[1:], " ")
+		}
+	},
 	"Modelis":    func(a *ad, c *goquery.Selection) { a.model = text(c) },
 	"Gads":       num("year"),
 	"Tilpums":    engine,
@@ -144,8 +153,9 @@ func parseRow(row *goquery.Selection, externalID string, names []string, now tim
 }
 
 func (a *ad) build() events.ListingDiscovered {
+	a.resolveCar()
 	l := a.ListingDiscovered
-	for k, v := range map[string]string{"district": a.district, "address": a.address, "model": a.model} {
+	for k, v := range map[string]string{"district": a.district, "address": a.address, "make": a.make, "model": a.model} {
 		if v != "" {
 			l.Attrs[k] = v
 		}
@@ -171,7 +181,7 @@ func displayFields(l events.ListingDiscovered, a *ad) []events.Field {
 	s := func(key string) string { v, _ := l.Str(key); return v }
 
 	add("📍 Location", strings.Join(nonEmpty(a.district, a.address), ", "), false)
-	add("🚗 Model", a.model, false)
+	add("🚗 Car", strings.Join(nonEmpty(a.make, a.model), " "), false)
 	add("📅 Year", n("year"), true)
 	if v, ok := l.Num("engine_l"); ok {
 		add("⚙️ Engine", fmt.Sprintf("%.1f %s", v, s("fuel")), true)
@@ -185,6 +195,17 @@ func displayFields(l events.ListingDiscovered, a *ad) []events.Field {
 	}
 	add("🏢 Series", s("series"), true)
 	return fs
+}
+
+// floor reads "2/4" as floor 2 in a house of 4 floors.
+func floor(a *ad, c *goquery.Selection) {
+	at, of, _ := strings.Cut(text(c), "/")
+	if n, err := strconv.Atoi(strings.TrimSpace(at)); err == nil {
+		a.Attrs["floor"] = float64(n)
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(of)); err == nil {
+		a.Attrs["floors"] = float64(n)
+	}
 }
 
 func num(key string) column {
@@ -203,8 +224,12 @@ func str(key string) column {
 	}
 }
 
-// engine reads "3.0D" as 3.0 litres, fuel "D". The suffix is kept as the site
-// writes it (D diesel, H hybrid, ...); no suffix is usually petrol.
+// fuelSuffix maps the engine column's suffix ("3.0D") to the search form's
+// fuel names. No suffix is petrol; petrol/gas looks the same on the list, so
+// a petrol/gas search also accepts plain petrol (see NormalizeSearch).
+var fuelSuffix = map[string]string{"": "Benzīns", "D": "Dīzelis", "H": "Hibrīds", "E": "Elektriskais"}
+
+// engine reads "3.0D" as 3.0 litres, fuel "Dīzelis".
 func engine(a *ad, c *goquery.Selection) {
 	m := engineRe.FindStringSubmatch(text(c))
 	if m == nil {
@@ -212,8 +237,40 @@ func engine(a *ad, c *goquery.Selection) {
 	}
 	if v, err := strconv.ParseFloat(strings.Replace(m[1], ",", ".", 1), 64); err == nil {
 		a.Attrs["engine_l"] = v
-		if m[2] != "" {
-			a.Attrs["fuel"] = m[2]
+		if fuel, ok := fuelSuffix[strings.ToUpper(m[2])]; ok {
+			a.Attrs["fuel"] = fuel
+		} else {
+			a.Attrs["fuel"] = m[2] // unknown suffix: keep what the site wrote
+		}
+	}
+}
+
+// resolveCar fills make and model from the ad's category path where the
+// table has no column for them, and spells both the way the codebook (the
+// search form) does, so filters written in those names match.
+func (a *ad) resolveCar() {
+	rest, ok := strings.CutPrefix(a.Location, CarsCategory+"/")
+	if !ok {
+		return
+	}
+	cb, err := CarsCodebook()
+	if err != nil {
+		return
+	}
+	slugs := strings.Split(rest, "/")
+	m, found := cb.MakeByName(a.make)
+	if !found {
+		m, found = cb.MakeBySlug(slugs[0])
+	}
+	if found {
+		a.make = m.Name
+	}
+	if a.model == "" && len(slugs) > 1 {
+		a.model = slugs[1]
+	}
+	if found && a.model != "" {
+		if o, ok := m.Model(a.model); ok {
+			a.model = o.Name
 		}
 	}
 }
@@ -232,12 +289,17 @@ func mileage(a *ad, c *goquery.Selection) {
 	a.Attrs["mileage_km"] = float64(n)
 }
 
-// splitDistrict splits an "area<br>street" cell. goquery's Text() would glue
-// the two parts together, so the <br> is turned into a newline first.
-func splitDistrict(cell *goquery.Selection) (district, address string) {
+// splitLines splits a cell on its <br>s. goquery's Text() would glue the
+// parts together, so each <br> is turned into a newline first.
+func splitLines(cell *goquery.Selection) []string {
 	clone := cell.Clone()
 	clone.Find("br").ReplaceWithHtml("\n")
-	parts := nonEmpty(strings.Split(clone.Text(), "\n")...)
+	return nonEmpty(strings.Split(clone.Text(), "\n")...)
+}
+
+// splitDistrict splits an "area<br>street" cell.
+func splitDistrict(cell *goquery.Selection) (district, address string) {
+	parts := splitLines(cell)
 	switch len(parts) {
 	case 0:
 		return "", ""

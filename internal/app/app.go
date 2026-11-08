@@ -25,6 +25,9 @@ import (
 
 const relayBatch = 100
 
+// digestCheckEvery is how often the notifier looks for digests that are due.
+const digestCheckEvery = 30 * time.Second
+
 // Scraper fetches the feeds users watch, for every registered source, and
 // publishes each ad it sees. It does no deduplication; ingest does.
 func Scraper(ctx context.Context, cfg config.Scraper, reg sources.Registry) error {
@@ -35,6 +38,12 @@ func Scraper(ctx context.Context, cfg config.Scraper, reg sources.Registry) erro
 	defer pool.Close()
 	subs := subscriptions.NewService(pool, reg, cfg.FeedCollapseAt)
 	if err := subs.Migrate(ctx); err != nil {
+		return err
+	}
+	// The scraper only reads which ads are stored (to know where it left off);
+	// ingest owns writing them. Migrating here too is safe: it takes a lock.
+	history := listings.NewService(pool, listings.DefaultSeedWindow)
+	if err := history.Migrate(ctx); err != nil {
 		return err
 	}
 
@@ -64,8 +73,9 @@ func Scraper(ctx context.Context, cfg config.Scraper, reg sources.Registry) erro
 	for _, name := range reg.Names() {
 		src := reg[name]
 		runner := &scraping.Runner{
-			Source: src,
-			Feeds:  subs,
+			Source:  src,
+			Feeds:   subs,
+			History: history,
 			Publish: func(ctx context.Context, l events.ListingDiscovered) error {
 				return producer.Publish(ctx, cfg.Topic(events.TopicListingsDiscovered), l.Source+"/"+l.ExternalID, l)
 			},
@@ -206,11 +216,14 @@ func Notifier(ctx context.Context, cfg config.Notifier, notifiers ...notificatio
 	}
 	defer pool.Close()
 
-	svc := notifications.NewService(pool, cfg.Delay, notifiers...)
+	svc := notifications.NewService(pool, cfg.Delay, notifiers...).WithBurst(cfg.Burst, cfg.BurstWindow)
 	if err := svc.Migrate(ctx); err != nil {
 		return err
 	}
+	if cfg.Burst > 0 {
+		go svc.RunDigests(ctx, min(digestCheckEvery, max(cfg.BurstWindow/2, time.Second)))
+	}
 
-	slog.Info("starting notifier")
+	slog.Info("starting notifier", "burst", cfg.Burst, "burst_window", cfg.BurstWindow)
 	return kafka.Consume(ctx, cfg.KafkaBrokers, cfg.Group("notifier"), cfg.Topic(events.TopicNotificationsRequested), svc.Handle)
 }

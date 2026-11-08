@@ -12,10 +12,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -90,16 +92,62 @@ func (s *Service) Notifications(ctx context.Context, l events.ListingDiscovered)
 		return nil, err
 	}
 
-	var out []Notification
+	var enricher sources.Enricher
+	enrichable := map[string]bool{}
+	if e, ok := src.(sources.Enricher); ok {
+		enricher = e
+		for _, k := range e.EnrichableKeys() {
+			enrichable[k] = true
+		}
+	}
+
+	// Pass 1 on what the feed page showed. Searches that pass every filter
+	// they can check, but filter on something only the ad page has, wait for
+	// pass 2.
+	var matched, pending []Search
 	for _, r := range rows {
 		search, err := searchFromRow(r)
 		if err != nil {
 			slog.Error("skipping search with bad filters", "search", r.ID, "err", err)
 			continue
 		}
-		if slices.Contains(done, search.ID) || !search.Match(src, l) {
+		if slices.Contains(done, search.ID) {
 			continue
 		}
+		switch search.Evaluate(src, l, enrichable) {
+		case Matched:
+			matched = append(matched, search)
+		case NeedsDetail:
+			pending = append(pending, search)
+		}
+	}
+
+	// Pass 2: one ad-page read for this listing, shared by every waiting
+	// search of every user.
+	if len(pending) > 0 {
+		enriched, err := enricher.Enrich(ctx, l)
+		switch {
+		case errors.Is(err, sources.ErrGone):
+			slog.Info("ad removed before its page was read", "id", l.ExternalID)
+		case err != nil:
+			// Better an unconfirmed alert than a missed deal: tell the
+			// candidates, flagged, rather than failing (and so dropping) the
+			// listing for everyone.
+			slog.Warn("ad page unavailable; notifying unconfirmed", "id", l.ExternalID, "err", err)
+			l.Fields = append(l.Fields, events.Field{Name: "⚠️ Unconfirmed", Value: "Could not read the ad page to check: " + strings.Join(pendingKeys(pending, l, enrichable), ", ")})
+			matched = append(matched, pending...)
+		default:
+			l = enriched
+			for _, search := range pending {
+				if search.Evaluate(src, l, nil) == Matched {
+					matched = append(matched, search)
+				}
+			}
+		}
+	}
+
+	out := make([]Notification, 0, len(matched))
+	for _, search := range matched {
 		listing := l
 		out = append(out, Notification{SearchID: search.ID, NotificationRequested: events.NotificationRequested{
 			Key:        fmt.Sprintf("%d:%s:%s", search.ID, l.Source, l.ExternalID),
@@ -110,6 +158,30 @@ func (s *Service) Notifications(ctx context.Context, l events.ListingDiscovered)
 		}})
 	}
 	return out, nil
+}
+
+// pendingKeys lists the filters that could not be checked, for the warning.
+func pendingKeys(searches []Search, l events.ListingDiscovered, enrichable map[string]bool) []string {
+	var keys []string
+	for _, s := range searches {
+		for _, m := range []map[string]bool{keysOf(s.Filters.Ranges), keysOf(s.Filters.OneOf), keysOf(s.Filters.AllOf)} {
+			for k := range m {
+				if _, has := l.Attrs[k]; enrichable[k] && !has {
+					keys = append(keys, k)
+				}
+			}
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
+func keysOf[V any](m map[string]V) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }
 
 // Record marks the notifications as handed off.

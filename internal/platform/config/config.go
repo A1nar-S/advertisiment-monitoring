@@ -73,7 +73,7 @@ func ScraperFromEnv() (Scraper, error) {
 		CrawlInterval:  time.Duration(envInt("CRAWL_INTERVAL_MINUTES", 5)) * time.Minute,
 		RequestTimeout: time.Duration(envInt("REQUEST_TIMEOUT", 30)) * time.Second,
 		RequestGap:     time.Duration(envInt("REQUEST_GAP_SECONDS", 2)) * time.Second,
-		MaxPages:       envInt("MAX_PAGES", 3),
+		MaxPages:       envInt("MAX_PAGES", 5),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
 		AdminChannel:   AdminChannel{Kind: env("ADMIN_CHANNEL_KIND", "discord"), Target: os.Getenv("ADMIN_CHANNEL_ID")},
 	}
@@ -108,14 +108,24 @@ type Matcher struct {
 	Common
 	UsersFile      string // optional; seeded on start when set
 	FeedCollapseAt int
+	// RequestTimeout and RequestGap apply to ad pages the matcher reads when a
+	// search filters on something the feed list does not show.
+	RequestTimeout time.Duration
+	RequestGap     time.Duration
 }
 
 func MatcherFromEnv() (Matcher, error) {
-	return Matcher{
+	c := Matcher{
 		Common:         commonFromEnv(),
 		UsersFile:      os.Getenv("USERS_FILE"),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
-	}, nil
+		RequestTimeout: time.Duration(envInt("REQUEST_TIMEOUT", 30)) * time.Second,
+		RequestGap:     time.Duration(envInt("REQUEST_GAP_SECONDS", 2)) * time.Second,
+	}
+	if c.RequestTimeout <= 0 {
+		return c, errors.New("REQUEST_TIMEOUT must be positive")
+	}
+	return c, nil
 }
 
 type Notifier struct {
@@ -123,6 +133,10 @@ type Notifier struct {
 	DiscordBotToken string
 	// Delay is the pause after each message, to stay under Discord's rate limit.
 	Delay time.Duration
+	// Burst is how many ad messages one search may send per BurstWindow; the
+	// rest are sent as one digest when the window is over.
+	Burst       int
+	BurstWindow time.Duration
 }
 
 func NotifierFromEnv() (Notifier, error) {
@@ -130,9 +144,14 @@ func NotifierFromEnv() (Notifier, error) {
 		Common:          commonFromEnv(),
 		DiscordBotToken: os.Getenv("DISCORD_BOT_TOKEN"),
 		Delay:           time.Duration(envInt("NOTIFY_DELAY_MS", 1000)) * time.Millisecond,
+		Burst:           envInt("NOTIFY_BURST", 5),
+		BurstWindow:     time.Duration(envInt("NOTIFY_BURST_WINDOW_MINUTES", 10)) * time.Minute,
 	}
 	if c.DiscordBotToken == "" {
 		return c, errors.New("DISCORD_BOT_TOKEN is required")
+	}
+	if c.Burst < 1 || c.BurstWindow <= 0 {
+		return c, errors.New("NOTIFY_BURST and NOTIFY_BURST_WINDOW_MINUTES must be positive")
 	}
 	return c, nil
 }
@@ -149,7 +168,7 @@ func AdminFromEnv() (Admin, error) {
 		Common:         commonFromEnv(),
 		UsersFile:      env("USERS_FILE", "config/users.yaml"),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
-		Retention:      time.Duration(envInt("RETENTION_HOURS", 7*24)) * time.Hour,
+		Retention:      time.Duration(envInt("RETENTION_HOURS", 60*24)) * time.Hour,
 	}
 	if c.Retention <= 0 {
 		return c, errors.New("RETENTION_HOURS must be positive")

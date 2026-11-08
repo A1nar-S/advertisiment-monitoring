@@ -32,5 +32,5 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return app.Matcher(ctx, cfg, app.KnownSources(0))
+	return app.Matcher(ctx, cfg, app.KnownSources(cfg.RequestTimeout, cfg.RequestGap))
 }

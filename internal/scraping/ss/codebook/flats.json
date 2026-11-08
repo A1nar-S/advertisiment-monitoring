@@ -1,0 +1,1936 @@
+{
+  "category": "real-estate/flats",
+  "fetched": "2026-11-08",
+  "fields": [
+    {
+      "key": "region",
+      "label": "Pilsēta, rajons",
+      "opt_ids": [
+        "20"
+      ],
+      "kind": "multi",
+      "from": "feed"
+    },
+    {
+      "key": "district",
+      "label": "Pagasts / rajons",
+      "opt_ids": [
+        "856"
+      ],
+      "kind": "multi",
+      "from": "feed"
+    },
+    {
+      "key": "deal",
+      "label": "Darījuma veids",
+      "opt_ids": null,
+      "kind": "multi",
+      "from": "feed",
+      "options": [
+        {
+          "id": "hand_over",
+          "name": "Izīrē"
+        },
+        {
+          "id": "sell",
+          "name": "Pārdod"
+        },
+        {
+          "id": "rent",
+          "name": "Īrē"
+        },
+        {
+          "id": "buy",
+          "name": "Pērk"
+        },
+        {
+          "id": "exchange",
+          "name": "Maina"
+        }
+      ]
+    },
+    {
+      "key": "rooms",
+      "label": "Istabu skaits",
+      "opt_ids": [
+        "1"
+      ],
+      "kind": "range",
+      "from": "list"
+    },
+    {
+      "key": "area_m2",
+      "label": "Platība, m²",
+      "opt_ids": [
+        "3"
+      ],
+      "kind": "range",
+      "from": "list"
+    },
+    {
+      "key": "floor",
+      "label": "Stāvs",
+      "opt_ids": [
+        "4"
+      ],
+      "kind": "range",
+      "from": "list"
+    },
+    {
+      "key": "floors",
+      "label": "Stāvu skaits mājā",
+      "opt_ids": null,
+      "kind": "range",
+      "from": "list"
+    },
+    {
+      "key": "series",
+      "label": "Sērija",
+      "opt_ids": [
+        "6"
+      ],
+      "kind": "multi",
+      "from": "list",
+      "options": [
+        {
+          "id": "67",
+          "name": "103."
+        },
+        {
+          "id": "68",
+          "name": "104."
+        },
+        {
+          "id": "69",
+          "name": "119."
+        },
+        {
+          "id": "70",
+          "name": "467."
+        },
+        {
+          "id": "71",
+          "name": "602."
+        },
+        {
+          "id": "73",
+          "name": "Čehu pr."
+        },
+        {
+          "id": "76",
+          "name": "Hrušč."
+        },
+        {
+          "id": "72",
+          "name": "LT proj."
+        },
+        {
+          "id": "74",
+          "name": "M. ģim."
+        },
+        {
+          "id": "79",
+          "name": "P. kara"
+        },
+        {
+          "id": "77",
+          "name": "Priv. m."
+        },
+        {
+          "id": "3616",
+          "name": "Renov."
+        },
+        {
+          "id": "78",
+          "name": "Specpr."
+        },
+        {
+          "id": "75",
+          "name": "Staļina"
+        },
+        {
+          "id": "3596",
+          "name": "Jaun."
+        }
+      ]
+    },
+    {
+      "key": "house_type",
+      "label": "Mājas tips",
+      "opt_ids": [
+        "2"
+      ],
+      "kind": "multi",
+      "from": "ad",
+      "options": [
+        {
+          "id": "11",
+          "name": "Ķieģeļu"
+        },
+        {
+          "id": "15",
+          "name": "Ķieģeļu-paneļu"
+        },
+        {
+          "id": "12",
+          "name": "Koka"
+        },
+        {
+          "id": "14",
+          "name": "Mūra"
+        },
+        {
+          "id": "13",
+          "name": "Paneļu"
+        },
+        {
+          "id": "16",
+          "name": "Paneļu - ķieģeļu"
+        }
+      ]
+    },
+    {
+      "key": "price",
+      "label": "Cena",
+      "opt_ids": [
+        "8"
+      ],
+      "kind": "range",
+      "from": "list"
+    }
+  ],
+  "regions": [
+    {
+      "name": "Rīga",
+      "slug": "riga",
+      "districts": [
+        {
+          "id": "centre",
+          "name": "Centrs"
+        },
+        {
+          "id": "agenskalns",
+          "name": "Āgenskalns"
+        },
+        {
+          "id": "aplokciems",
+          "name": "Aplokciems"
+        },
+        {
+          "id": "bergi",
+          "name": "Berģi"
+        },
+        {
+          "id": "bierini",
+          "name": "Bieriņi"
+        },
+        {
+          "id": "bolderaya",
+          "name": "Bolderāja"
+        },
+        {
+          "id": "breksi",
+          "name": "Brekši"
+        },
+        {
+          "id": "bukulti",
+          "name": "Bukulti"
+        },
+        {
+          "id": "bulli",
+          "name": "Buļļi"
+        },
+        {
+          "id": "chiekurkalns",
+          "name": "Čiekurkalns"
+        },
+        {
+          "id": "darzciems",
+          "name": "Dārzciems"
+        },
+        {
+          "id": "daugavgriva",
+          "name": "Daugavgrīva"
+        },
+        {
+          "id": "dreilini",
+          "name": "Dreiliņi"
+        },
+        {
+          "id": "dzeguzhkalns",
+          "name": "Dzegužkalns (Dzirciems)"
+        },
+        {
+          "id": "grizinkalns",
+          "name": "Grīziņkalns"
+        },
+        {
+          "id": "ilguciems",
+          "name": "Iļģuciems"
+        },
+        {
+          "id": "imanta",
+          "name": "Imanta"
+        },
+        {
+          "id": "janjavarti",
+          "name": "Jāņavārti"
+        },
+        {
+          "id": "jaunciems",
+          "name": "Jaunciems"
+        },
+        {
+          "id": "jaunmilgravis",
+          "name": "Jaunmīlgrāvis"
+        },
+        {
+          "id": "yugla",
+          "name": "Jugla"
+        },
+        {
+          "id": "katlakalns",
+          "name": "Katlakalns"
+        },
+        {
+          "id": "kengarags",
+          "name": "Ķengarags"
+        },
+        {
+          "id": "kiburga",
+          "name": "Ķiburga"
+        },
+        {
+          "id": "kipsala",
+          "name": "Ķīpsala"
+        },
+        {
+          "id": "kleisti",
+          "name": "Kleisti"
+        },
+        {
+          "id": "kliversala",
+          "name": "Klīversala"
+        },
+        {
+          "id": "krasta-st-area",
+          "name": "Krasta r-ns"
+        },
+        {
+          "id": "kundzinsala",
+          "name": "Kundziņsala"
+        },
+        {
+          "id": "maskavas-priekshpilseta",
+          "name": "Latgales priekšpilsēta"
+        },
+        {
+          "id": "lucavsala",
+          "name": "Lucavsala"
+        },
+        {
+          "id": "mangali",
+          "name": "Mangaļi"
+        },
+        {
+          "id": "mangalsala",
+          "name": "Mangaļsala"
+        },
+        {
+          "id": "mezhapark",
+          "name": "Mežaparks"
+        },
+        {
+          "id": "mezhciems",
+          "name": "Mežciems"
+        },
+        {
+          "id": "plyavnieki",
+          "name": "Pļavnieki"
+        },
+        {
+          "id": "purvciems",
+          "name": "Purvciems"
+        },
+        {
+          "id": "shampeteris-pleskodale",
+          "name": "Šampēteris-Pleskodāle"
+        },
+        {
+          "id": "sarkandaugava",
+          "name": "Sarkandaugava"
+        },
+        {
+          "id": "shkirotava",
+          "name": "Šķirotava"
+        },
+        {
+          "id": "teika",
+          "name": "Teika"
+        },
+        {
+          "id": "tornjakalns",
+          "name": "Torņakalns"
+        },
+        {
+          "id": "trisciems",
+          "name": "Trīsciems"
+        },
+        {
+          "id": "vecaki",
+          "name": "Vecāķi"
+        },
+        {
+          "id": "vecdaugava",
+          "name": "Vecdaugava"
+        },
+        {
+          "id": "vecmilgravis",
+          "name": "Vecmīlgrāvis"
+        },
+        {
+          "id": "vecriga",
+          "name": "Vecrīga"
+        },
+        {
+          "id": "voleri",
+          "name": "Voleri"
+        },
+        {
+          "id": "zakusala",
+          "name": "Zaķusala"
+        },
+        {
+          "id": "zasulauks",
+          "name": "Zasulauks"
+        },
+        {
+          "id": "ziepniekkalns",
+          "name": "Ziepniekkalns"
+        },
+        {
+          "id": "zolitude",
+          "name": "Zolitūde"
+        },
+        {
+          "id": "vef",
+          "name": "VEF"
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Jūrmala",
+      "slug": "jurmala",
+      "districts": [
+        {
+          "id": "asari",
+          "name": "Asari"
+        },
+        {
+          "id": "bulduri",
+          "name": "Bulduri"
+        },
+        {
+          "id": "bulluciems",
+          "name": "Buļļuciems"
+        },
+        {
+          "id": "dubulti",
+          "name": "Dubulti"
+        },
+        {
+          "id": "dzintari",
+          "name": "Dzintari"
+        },
+        {
+          "id": "jaundubulti",
+          "name": "Jaundubulti"
+        },
+        {
+          "id": "kauguri",
+          "name": "Kauguri"
+        },
+        {
+          "id": "kemeri",
+          "name": "Ķemeri"
+        },
+        {
+          "id": "lielupe",
+          "name": "Lielupe"
+        },
+        {
+          "id": "majori",
+          "name": "Majori"
+        },
+        {
+          "id": "melluzi",
+          "name": "Melluži"
+        },
+        {
+          "id": "priedaine",
+          "name": "Priedaine"
+        },
+        {
+          "id": "pumpuri",
+          "name": "Pumpuri"
+        },
+        {
+          "id": "sloka",
+          "name": "Sloka"
+        },
+        {
+          "id": "vaivari",
+          "name": "Vaivari"
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Rīgas rajons",
+      "slug": "riga-region",
+      "districts": [
+        {
+          "id": "baldone",
+          "name": "Baldone"
+        },
+        {
+          "id": "balozi",
+          "name": "Baloži"
+        },
+        {
+          "id": "olaine",
+          "name": "Olaine"
+        },
+        {
+          "id": "salaspils",
+          "name": "Salaspils"
+        },
+        {
+          "id": "saulkrasti",
+          "name": "Saulkrasti"
+        },
+        {
+          "id": "sigulda",
+          "name": "Sigulda"
+        },
+        {
+          "id": "vangazi",
+          "name": "Vangaži"
+        },
+        {
+          "id": "adazu-nov",
+          "name": "Ādažu nov."
+        },
+        {
+          "id": "allazu-pag",
+          "name": "Allažu pag."
+        },
+        {
+          "id": "babites-pag",
+          "name": "Babītes pag."
+        },
+        {
+          "id": "carnikavas-nov",
+          "name": "Carnikavas nov."
+        },
+        {
+          "id": "daugmales-pag",
+          "name": "Daugmales pag."
+        },
+        {
+          "id": "garkalnes-nov",
+          "name": "Garkalnes nov."
+        },
+        {
+          "id": "incukalna-nov",
+          "name": "Inčukalna nov."
+        },
+        {
+          "id": "kekavas-pag",
+          "name": "Ķekavas pag."
+        },
+        {
+          "id": "krimuldas-pag",
+          "name": "Krimuldas pag."
+        },
+        {
+          "id": "malpils-pag",
+          "name": "Mālpils pag."
+        },
+        {
+          "id": "marupes-pag",
+          "name": "Mārupes pag."
+        },
+        {
+          "id": "olaines-pag",
+          "name": "Olaines pag."
+        },
+        {
+          "id": "ropazu-nov",
+          "name": "Ropažu nov."
+        },
+        {
+          "id": "salas-pag",
+          "name": "Salas pag."
+        },
+        {
+          "id": "salaspils-l-t",
+          "name": "Salaspils l. t."
+        },
+        {
+          "id": "sejas-nov",
+          "name": "Sējas nov."
+        },
+        {
+          "id": "stopinu-nov",
+          "name": "Stopiņu nov."
+        }
+      ]
+    },
+    {
+      "name": "Aizkraukle un rajons",
+      "slug": "aizkraukle-and-reg",
+      "districts": [
+        {
+          "id": "aizkraukles",
+          "name": "Aizkraukle"
+        },
+        {
+          "id": "jaunjelgava",
+          "name": "Jaunjelgava"
+        },
+        {
+          "id": "plavinas",
+          "name": "Pļaviņas"
+        },
+        {
+          "id": "aizkraukles-pag",
+          "name": "Aizkraukles pag."
+        },
+        {
+          "id": "bebru-pag",
+          "name": "Bebru pag."
+        },
+        {
+          "id": "kokneses-pag",
+          "name": "Kokneses pag."
+        },
+        {
+          "id": "neretas-pag",
+          "name": "Neretas pag."
+        },
+        {
+          "id": "pilskalnes-pag",
+          "name": "Pilskalnes pag."
+        },
+        {
+          "id": "seces-pag",
+          "name": "Seces pag."
+        },
+        {
+          "id": "skriveru-pag",
+          "name": "Skrīveru pag."
+        }
+      ]
+    },
+    {
+      "name": "Alūksne un rajons",
+      "slug": "aluksne-and-reg",
+      "districts": [
+        {
+          "id": "aluksne",
+          "name": "Alūksne"
+        },
+        {
+          "id": "ape",
+          "name": "Ape"
+        },
+        {
+          "id": "alsviku-pag",
+          "name": "Alsviķu pag."
+        },
+        {
+          "id": "gaujienas-pag",
+          "name": "Gaujienas pag."
+        },
+        {
+          "id": "jaunlaicenes-pag",
+          "name": "Jaunlaicenes pag."
+        },
+        {
+          "id": "liepnas-pag",
+          "name": "Liepnas pag."
+        },
+        {
+          "id": "malienas-pag",
+          "name": "Malienas pag."
+        },
+        {
+          "id": "ziemera-pag",
+          "name": "Ziemera pag."
+        }
+      ]
+    },
+    {
+      "name": "Balvi un rajons",
+      "slug": "balvi-and-reg",
+      "districts": [
+        {
+          "id": "balvi",
+          "name": "Balvi"
+        },
+        {
+          "id": "vilaka",
+          "name": "Viļaka"
+        },
+        {
+          "id": "berzkalnes-pag",
+          "name": "Bērzkalnes pag."
+        },
+        {
+          "id": "tilzas-pag",
+          "name": "Tilžas pag."
+        },
+        {
+          "id": "ziguru-pag",
+          "name": "Žīguru pag."
+        }
+      ]
+    },
+    {
+      "name": "Bauska un rajons",
+      "slug": "bauska-and-reg",
+      "districts": [
+        {
+          "id": "bauska",
+          "name": "Bauska"
+        },
+        {
+          "id": "brunavas-pag",
+          "name": "Brunavas pag."
+        },
+        {
+          "id": "ceraukstes-pag",
+          "name": "Ceraukstes pag."
+        },
+        {
+          "id": "codes-pag",
+          "name": "Codes pag."
+        },
+        {
+          "id": "davinu-pag",
+          "name": "Dāviņu pag."
+        },
+        {
+          "id": "gailisu-pag",
+          "name": "Gailīšu pag."
+        },
+        {
+          "id": "iecavas-nov",
+          "name": "Iecavas nov."
+        },
+        {
+          "id": "islices-pag",
+          "name": "Īslīces pag."
+        },
+        {
+          "id": "mezotnes-pag",
+          "name": "Mežotnes pag."
+        },
+        {
+          "id": "rundales-pag",
+          "name": "Rundāles pag."
+        },
+        {
+          "id": "skaistkalnes-pag",
+          "name": "Skaistkalnes pag."
+        },
+        {
+          "id": "stelpes-pag",
+          "name": "Stelpes pag."
+        },
+        {
+          "id": "vecsaules-pag",
+          "name": "Vecsaules pag."
+        },
+        {
+          "id": "vecumnieku-pag",
+          "name": "Vecumnieku pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Cēsis un rajons",
+      "slug": "cesis-and-reg",
+      "districts": [
+        {
+          "id": "cesis",
+          "name": "Cēsis"
+        },
+        {
+          "id": "ligatne",
+          "name": "Līgatne"
+        },
+        {
+          "id": "amatas-pag",
+          "name": "Amatas pag."
+        },
+        {
+          "id": "drabesu-pag",
+          "name": "Drabešu pag."
+        },
+        {
+          "id": "dzerbenes-pag",
+          "name": "Dzērbenes pag."
+        },
+        {
+          "id": "inesu-pag",
+          "name": "Inešu pag."
+        },
+        {
+          "id": "jaunpiebalgas-pag",
+          "name": "Jaunpiebalgas pag."
+        },
+        {
+          "id": "liepas-pag",
+          "name": "Liepas pag."
+        },
+        {
+          "id": "ligatnes-pag",
+          "name": "Līgatnes pag."
+        },
+        {
+          "id": "priekulu-pag",
+          "name": "Priekuļu pag."
+        },
+        {
+          "id": "raunas-pag",
+          "name": "Raunas pag."
+        },
+        {
+          "id": "vaives-pag",
+          "name": "Vaives pag."
+        },
+        {
+          "id": "vecpiebalgas-pag",
+          "name": "Vecpiebalgas pag."
+        },
+        {
+          "id": "zaubes-pag",
+          "name": "Zaubes pag."
+        }
+      ]
+    },
+    {
+      "name": "Daugavpils un rajons",
+      "slug": "daugavpils-and-reg",
+      "districts": [
+        {
+          "id": "daugavpils",
+          "name": "Daugavpils"
+        },
+        {
+          "id": "ilukste",
+          "name": "Ilūkste"
+        },
+        {
+          "id": "eglaines-pag",
+          "name": "Eglaines pag."
+        },
+        {
+          "id": "kalkunes-pag",
+          "name": "Kalkūnes pag."
+        },
+        {
+          "id": "laucesas-pag",
+          "name": "Laucesas pag."
+        },
+        {
+          "id": "naujenes-pag",
+          "name": "Naujenes pag."
+        },
+        {
+          "id": "nicgales-pag",
+          "name": "Nīcgales pag."
+        },
+        {
+          "id": "pilskalnes-pag",
+          "name": "Pilskalnes pag."
+        },
+        {
+          "id": "salienas-pag",
+          "name": "Salienas pag."
+        },
+        {
+          "id": "skrudalienas-pag",
+          "name": "Skrudalienas pag."
+        },
+        {
+          "id": "sventes-pag",
+          "name": "Sventes pag."
+        },
+        {
+          "id": "visku-pag",
+          "name": "Višķu pag."
+        }
+      ]
+    },
+    {
+      "name": "Dobele un rajons",
+      "slug": "dobele-and-reg",
+      "districts": [
+        {
+          "id": "auce",
+          "name": "Auce"
+        },
+        {
+          "id": "dobele",
+          "name": "Dobele"
+        },
+        {
+          "id": "auces-l-t",
+          "name": "Auces l. t."
+        },
+        {
+          "id": "auru-pag",
+          "name": "Auru pag."
+        },
+        {
+          "id": "benes-pag",
+          "name": "Bēnes pag."
+        },
+        {
+          "id": "dobeles-pag",
+          "name": "Dobeles pag."
+        },
+        {
+          "id": "jaunberzes-pag",
+          "name": "Jaunbērzes pag."
+        },
+        {
+          "id": "krimunu-pag",
+          "name": "Krimūnu pag."
+        },
+        {
+          "id": "naudites-pag",
+          "name": "Naudītes pag."
+        },
+        {
+          "id": "tervetes-pag",
+          "name": "Tērvetes pag."
+        },
+        {
+          "id": "zebrenes-pag",
+          "name": "Zebrenes pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Gulbene un rajons",
+      "slug": "gulbene-and-reg",
+      "districts": [
+        {
+          "id": "gulbene",
+          "name": "Gulbene"
+        },
+        {
+          "id": "belavas-pag",
+          "name": "Beļavas pag."
+        },
+        {
+          "id": "daukstu-pag",
+          "name": "Daukstu pag."
+        },
+        {
+          "id": "jaungulbenes-pag",
+          "name": "Jaungulbenes pag."
+        },
+        {
+          "id": "lejasciema-pag",
+          "name": "Lejasciema pag."
+        },
+        {
+          "id": "litenes-pag",
+          "name": "Litenes pag."
+        },
+        {
+          "id": "stamerienas-pag",
+          "name": "Stāmerienas pag."
+        },
+        {
+          "id": "stradu-pag",
+          "name": "Stradu pag."
+        }
+      ]
+    },
+    {
+      "name": "Jēkabpils un rajons",
+      "slug": "jekabpils-and-reg",
+      "districts": [
+        {
+          "id": "jekabpils",
+          "name": "Jēkabpils"
+        },
+        {
+          "id": "viesite",
+          "name": "Viesīte"
+        },
+        {
+          "id": "abelu-pag",
+          "name": "Ābeļu pag."
+        },
+        {
+          "id": "dignajas-pag",
+          "name": "Dignājas pag."
+        },
+        {
+          "id": "kalna-pag",
+          "name": "Kalna pag."
+        },
+        {
+          "id": "krustpils-pag",
+          "name": "Krustpils pag."
+        },
+        {
+          "id": "kuku-pag",
+          "name": "Kūku pag."
+        },
+        {
+          "id": "rubenes-pag",
+          "name": "Rubenes pag."
+        },
+        {
+          "id": "salas-pag",
+          "name": "Salas pag."
+        },
+        {
+          "id": "saukas-pag",
+          "name": "Saukas pag."
+        },
+        {
+          "id": "zasas-pag",
+          "name": "Zasas pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Jelgava un rajons",
+      "slug": "jelgava-and-reg",
+      "districts": [
+        {
+          "id": "jelgava",
+          "name": "Jelgava"
+        },
+        {
+          "id": "kalnciems",
+          "name": "Kalnciems"
+        },
+        {
+          "id": "cenu-pag",
+          "name": "Cenas pag."
+        },
+        {
+          "id": "elejas-pag",
+          "name": "Elejas pag."
+        },
+        {
+          "id": "gludas-pag",
+          "name": "Glūdas pag."
+        },
+        {
+          "id": "jaunsvirlaukas-pag",
+          "name": "Jaunsvirlaukas pag."
+        },
+        {
+          "id": "lielplatones-pag",
+          "name": "Lielplatones pag."
+        },
+        {
+          "id": "livberzes-pag",
+          "name": "Līvbērzes pag."
+        },
+        {
+          "id": "ozolnieku-pag",
+          "name": "Ozolnieku pag."
+        },
+        {
+          "id": "vircavas-pag",
+          "name": "Vircavas pag."
+        },
+        {
+          "id": "zalenieku-pag",
+          "name": "Zaļenieku pag."
+        }
+      ]
+    },
+    {
+      "name": "Krāslava un rajons",
+      "slug": "kraslava-and-reg",
+      "districts": [
+        {
+          "id": "dagda",
+          "name": "Dagda"
+        },
+        {
+          "id": "kraslava",
+          "name": "Krāslava"
+        },
+        {
+          "id": "andrupenes-pag",
+          "name": "Andrupenes pag."
+        },
+        {
+          "id": "asunes-pag",
+          "name": "Asūnes pag."
+        },
+        {
+          "id": "skeltovas-pag",
+          "name": "Šķeltovas pag."
+        }
+      ]
+    },
+    {
+      "name": "Kuldīga un rajons",
+      "slug": "kuldiga-and-reg",
+      "districts": [
+        {
+          "id": "kuldiga",
+          "name": "Kuldīga"
+        },
+        {
+          "id": "skrunda",
+          "name": "Skrunda"
+        },
+        {
+          "id": "alsungas-pag",
+          "name": "Alsungas pag."
+        },
+        {
+          "id": "kurmales-pag",
+          "name": "Kurmāles pag."
+        },
+        {
+          "id": "laidu-pag",
+          "name": "Laidu pag."
+        },
+        {
+          "id": "padures-pag",
+          "name": "Padures pag."
+        },
+        {
+          "id": "ranku-pag",
+          "name": "Raņķu pag."
+        },
+        {
+          "id": "rendas-pag",
+          "name": "Rendas pag."
+        },
+        {
+          "id": "rudbarzu-pag",
+          "name": "Rudbāržu pag."
+        },
+        {
+          "id": "rumbas-pag",
+          "name": "Rumbas pag."
+        },
+        {
+          "id": "skrundas-l-t",
+          "name": "Skrundas l. t."
+        },
+        {
+          "id": "snepeles-pag",
+          "name": "Snēpeles pag."
+        }
+      ]
+    },
+    {
+      "name": "Liepāja un rajons",
+      "slug": "liepaja-and-reg",
+      "districts": [
+        {
+          "id": "aizpute",
+          "name": "Aizpute"
+        },
+        {
+          "id": "grobina",
+          "name": "Grobiņa"
+        },
+        {
+          "id": "liepaja",
+          "name": "Liepāja"
+        },
+        {
+          "id": "pavilosta",
+          "name": "Pāvilosta"
+        },
+        {
+          "id": "priekule",
+          "name": "Priekule"
+        },
+        {
+          "id": "bartas-pag",
+          "name": "Bārtas pag."
+        },
+        {
+          "id": "bunkas-pag",
+          "name": "Bunkas pag."
+        },
+        {
+          "id": "ciravas-pag",
+          "name": "Cīravas pag."
+        },
+        {
+          "id": "dunikas-pag",
+          "name": "Dunikas pag."
+        },
+        {
+          "id": "embutes-pag",
+          "name": "Embūtes pag."
+        },
+        {
+          "id": "gaviezes-pag",
+          "name": "Gaviezes pag."
+        },
+        {
+          "id": "grobinas-pag",
+          "name": "Grobiņas pag."
+        },
+        {
+          "id": "kazdangas-pag",
+          "name": "Kazdangas pag."
+        },
+        {
+          "id": "nicas-pag",
+          "name": "Nīcas pag."
+        },
+        {
+          "id": "otanku-pag",
+          "name": "Otaņķu pag."
+        },
+        {
+          "id": "tadaiku-pag",
+          "name": "Tadaiķu pag."
+        },
+        {
+          "id": "vainodes-pag",
+          "name": "Vaiņodes pag."
+        },
+        {
+          "id": "vergales-pag",
+          "name": "Vērgales pag."
+        },
+        {
+          "id": "virgas-pag",
+          "name": "Virgas pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Limbaži un rajons",
+      "slug": "limbadzi-and-reg",
+      "districts": [
+        {
+          "id": "ainazi",
+          "name": "Ainaži"
+        },
+        {
+          "id": "aloja",
+          "name": "Aloja"
+        },
+        {
+          "id": "limbazi",
+          "name": "Limbaži"
+        },
+        {
+          "id": "salacgriva",
+          "name": "Salacgrīva"
+        },
+        {
+          "id": "staicele",
+          "name": "Staicele"
+        },
+        {
+          "id": "braslavas-pag",
+          "name": "Braslavas pag."
+        },
+        {
+          "id": "brivzemnieku-pag",
+          "name": "Brīvzemnieku pag."
+        },
+        {
+          "id": "ledurgas-pag",
+          "name": "Lēdurgas pag."
+        },
+        {
+          "id": "liepupes-pag",
+          "name": "Liepupes pag."
+        },
+        {
+          "id": "limbazu-pag",
+          "name": "Limbažu pag."
+        },
+        {
+          "id": "salacgrivas-l-t",
+          "name": "Salacgrīvas l. t."
+        },
+        {
+          "id": "umurgas-pag",
+          "name": "Umurgas pag."
+        },
+        {
+          "id": "vidrizu-pag",
+          "name": "Vidrižu pag."
+        },
+        {
+          "id": "vilkenes-pag",
+          "name": "Viļķenes pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Ludza un rajons",
+      "slug": "ludza-and-reg",
+      "districts": [
+        {
+          "id": "karsava",
+          "name": "Kārsava"
+        },
+        {
+          "id": "ludza",
+          "name": "Ludza"
+        },
+        {
+          "id": "blontu-pag",
+          "name": "Blontu pag."
+        },
+        {
+          "id": "brigu-pag",
+          "name": "Briģu pag."
+        },
+        {
+          "id": "ciblas-pag",
+          "name": "Ciblas pag."
+        },
+        {
+          "id": "isnaudas-pag",
+          "name": "Isnaudas pag."
+        },
+        {
+          "id": "malnavas-pag",
+          "name": "Malnavas pag."
+        },
+        {
+          "id": "nuksu-pag",
+          "name": "Ņukšu pag."
+        },
+        {
+          "id": "rundenu-pag",
+          "name": "Rundēnu pag."
+        },
+        {
+          "id": "salnavas-pag",
+          "name": "Salnavas pag."
+        },
+        {
+          "id": "zvirgzdenes-pag",
+          "name": "Zvirgzdenes pag."
+        }
+      ]
+    },
+    {
+      "name": "Madona un rajons",
+      "slug": "madona-and-reg",
+      "districts": [
+        {
+          "id": "cesvaine",
+          "name": "Cesvaine"
+        },
+        {
+          "id": "lubana",
+          "name": "Lubāna"
+        },
+        {
+          "id": "madona",
+          "name": "Madona"
+        },
+        {
+          "id": "varaklani",
+          "name": "Varakļāni"
+        },
+        {
+          "id": "aronas-pag",
+          "name": "Aronas pag."
+        },
+        {
+          "id": "berzaunes-pag",
+          "name": "Bērzaunes pag."
+        },
+        {
+          "id": "cesvaines-l-t",
+          "name": "Cesvaines l. t."
+        },
+        {
+          "id": "erglu-pag",
+          "name": "Ērgļu pag."
+        },
+        {
+          "id": "kalsnavas-pag",
+          "name": "Kalsnavas pag."
+        },
+        {
+          "id": "lazdonas-pag",
+          "name": "Lazdonas pag."
+        },
+        {
+          "id": "marcienas-pag",
+          "name": "Mārcienas pag."
+        },
+        {
+          "id": "metrienas-pag",
+          "name": "Mētrienas pag."
+        },
+        {
+          "id": "sarkanu-pag",
+          "name": "Sarkaņu pag."
+        }
+      ]
+    },
+    {
+      "name": "Ogre un rajons",
+      "slug": "ogre-and-reg",
+      "districts": [
+        {
+          "id": "ikskile",
+          "name": "Ikšķile"
+        },
+        {
+          "id": "kegums",
+          "name": "Ķegums"
+        },
+        {
+          "id": "lielvarde",
+          "name": "Lielvārde"
+        },
+        {
+          "id": "ogre",
+          "name": "Ogre"
+        },
+        {
+          "id": "birzgales-pag",
+          "name": "Birzgales pag."
+        },
+        {
+          "id": "jumpravas-pag",
+          "name": "Jumpravas pag."
+        },
+        {
+          "id": "keipenes-pag",
+          "name": "Ķeipenes pag."
+        },
+        {
+          "id": "krapes-pag",
+          "name": "Krapes pag."
+        },
+        {
+          "id": "lauberes-pag",
+          "name": "Lauberes pag."
+        },
+        {
+          "id": "ledmanes-pag",
+          "name": "Lēdmanes pag."
+        },
+        {
+          "id": "lielvardes-l-t",
+          "name": "Lielvārdes l. t."
+        },
+        {
+          "id": "madlienas-pag",
+          "name": "Madlienas pag."
+        },
+        {
+          "id": "ogresgala-pag",
+          "name": "Ogresgala pag."
+        },
+        {
+          "id": "rembates-pag",
+          "name": "Rembates pag."
+        },
+        {
+          "id": "taurupes-pag",
+          "name": "Taurupes pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Preiļi un rajons",
+      "slug": "preili-and-reg",
+      "districts": [
+        {
+          "id": "livani",
+          "name": "Līvāni"
+        },
+        {
+          "id": "preili",
+          "name": "Preiļi"
+        },
+        {
+          "id": "aglonas-pag",
+          "name": "Aglonas pag."
+        },
+        {
+          "id": "jersikas-pag",
+          "name": "Jersikas pag."
+        },
+        {
+          "id": "preilu-pag",
+          "name": "Preiļu pag."
+        },
+        {
+          "id": "sutru-pag",
+          "name": "Sutru pag."
+        },
+        {
+          "id": "upmalas-pag",
+          "name": "Upmalas pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Rēzekne un rajons",
+      "slug": "rezekne-and-reg",
+      "districts": [
+        {
+          "id": "rezekne",
+          "name": "Rēzekne"
+        },
+        {
+          "id": "vilani",
+          "name": "Viļāni"
+        },
+        {
+          "id": "audrinu-pag",
+          "name": "Audriņu pag."
+        },
+        {
+          "id": "cornajas-pag",
+          "name": "Čornajas pag."
+        },
+        {
+          "id": "feimanu-pag",
+          "name": "Feimaņu pag."
+        },
+        {
+          "id": "luznavas-pag",
+          "name": "Lūznavas pag."
+        },
+        {
+          "id": "maltas-pag",
+          "name": "Maltas pag."
+        },
+        {
+          "id": "ozolaines-pag",
+          "name": "Ozolaines pag."
+        },
+        {
+          "id": "ozolmuizas-pag",
+          "name": "Ozolmuižas pag."
+        },
+        {
+          "id": "struzanu-pag",
+          "name": "Stružānu pag."
+        },
+        {
+          "id": "vilanu-pag",
+          "name": "Viļānu pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Saldus un rajons",
+      "slug": "saldus-and-reg",
+      "districts": [
+        {
+          "id": "broceni",
+          "name": "Brocēni"
+        },
+        {
+          "id": "saldus",
+          "name": "Saldus"
+        },
+        {
+          "id": "blidenes-pag",
+          "name": "Blīdenes pag."
+        },
+        {
+          "id": "ezeres-pag",
+          "name": "Ezeres pag."
+        },
+        {
+          "id": "lutrinu-pag",
+          "name": "Lutriņu pag."
+        },
+        {
+          "id": "nigrandes-pag",
+          "name": "Nīgrandes pag."
+        },
+        {
+          "id": "novadnieku-pag",
+          "name": "Novadnieku pag."
+        },
+        {
+          "id": "pampalu-pag",
+          "name": "Pampāļu pag."
+        },
+        {
+          "id": "saldus-pag",
+          "name": "Saldus pag."
+        },
+        {
+          "id": "skedes-pag",
+          "name": "Šķēdes pag."
+        },
+        {
+          "id": "zanas-pag",
+          "name": "Zaņas pag."
+        },
+        {
+          "id": "zirnu-pag",
+          "name": "Zirņu pag."
+        }
+      ]
+    },
+    {
+      "name": "Talsi un rajons",
+      "slug": "talsi-and-reg",
+      "districts": [
+        {
+          "id": "sabile",
+          "name": "Sabile"
+        },
+        {
+          "id": "stende",
+          "name": "Stende"
+        },
+        {
+          "id": "talsi",
+          "name": "Talsi"
+        },
+        {
+          "id": "valdemarpils",
+          "name": "Valdemārpils"
+        },
+        {
+          "id": "balgales-pag",
+          "name": "Balgales pag."
+        },
+        {
+          "id": "dundagas-pag",
+          "name": "Dundagas pag."
+        },
+        {
+          "id": "ives-pag",
+          "name": "Īves pag."
+        },
+        {
+          "id": "kolkas-pag",
+          "name": "Kolkas pag."
+        },
+        {
+          "id": "laidzes-pag",
+          "name": "Laidzes pag."
+        },
+        {
+          "id": "laucienes-pag",
+          "name": "Laucienes pag."
+        },
+        {
+          "id": "mersraga-pag",
+          "name": "Mērsraga pag."
+        },
+        {
+          "id": "rojas-pag",
+          "name": "Rojas pag."
+        },
+        {
+          "id": "valdgales-pag",
+          "name": "Valdgales pag."
+        },
+        {
+          "id": "virbu-pag",
+          "name": "Virbu pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Tukums un rajons",
+      "slug": "tukums-and-reg",
+      "districts": [
+        {
+          "id": "kandava",
+          "name": "Kandava"
+        },
+        {
+          "id": "tukums",
+          "name": "Tukums"
+        },
+        {
+          "id": "ceres-pag",
+          "name": "Cēres pag."
+        },
+        {
+          "id": "degoles-pag",
+          "name": "Degoles pag."
+        },
+        {
+          "id": "dzukstes-pag",
+          "name": "Džūkstes pag."
+        },
+        {
+          "id": "engures-pag",
+          "name": "Engures pag."
+        },
+        {
+          "id": "irlavas-pag",
+          "name": "Irlavas pag."
+        },
+        {
+          "id": "jaunpils-pag",
+          "name": "Jaunpils pag."
+        },
+        {
+          "id": "lapmezciema-nov",
+          "name": "Lapmežciema nov."
+        },
+        {
+          "id": "lestenes-pag",
+          "name": "Lestenes pag."
+        },
+        {
+          "id": "semes-pag",
+          "name": "Sēmes pag."
+        },
+        {
+          "id": "slampes-pag",
+          "name": "Slampes pag."
+        },
+        {
+          "id": "smardes-pag",
+          "name": "Smārdes pag."
+        },
+        {
+          "id": "tumes-pag",
+          "name": "Tumes pag."
+        },
+        {
+          "id": "zantes-pag",
+          "name": "Zantes pag."
+        },
+        {
+          "id": "zentenes-pag",
+          "name": "Zentenes pag."
+        }
+      ]
+    },
+    {
+      "name": "Valka un rajons",
+      "slug": "valka-and-reg",
+      "districts": [
+        {
+          "id": "seda",
+          "name": "Seda"
+        },
+        {
+          "id": "smiltene",
+          "name": "Smiltene"
+        },
+        {
+          "id": "valka",
+          "name": "Valka"
+        },
+        {
+          "id": "karku-pag",
+          "name": "Kārķu pag."
+        },
+        {
+          "id": "launkalnes-pag",
+          "name": "Launkalnes pag."
+        },
+        {
+          "id": "planu-pag",
+          "name": "Plāņu pag."
+        },
+        {
+          "id": "smiltenes-pag",
+          "name": "Smiltenes pag."
+        },
+        {
+          "id": "valkas-pag",
+          "name": "Valkas pag."
+        },
+        {
+          "id": "vijciema-pag",
+          "name": "Vijciema pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Valmiera un rajons",
+      "slug": "valmiera-and-reg",
+      "districts": [
+        {
+          "id": "mazsalaca",
+          "name": "Mazsalaca"
+        },
+        {
+          "id": "rujiena",
+          "name": "Rūjiena"
+        },
+        {
+          "id": "valmiera",
+          "name": "Valmiera"
+        },
+        {
+          "id": "berzaines-pag",
+          "name": "Bērzaines pag."
+        },
+        {
+          "id": "kauguru-pag",
+          "name": "Kauguru pag."
+        },
+        {
+          "id": "kocenu-pag",
+          "name": "Kocēnu pag."
+        },
+        {
+          "id": "rencenu-pag",
+          "name": "Rencēnu pag."
+        },
+        {
+          "id": "valmieras-pag",
+          "name": "Valmieras pag."
+        },
+        {
+          "id": "vecates-pag",
+          "name": "Vecates pag."
+        },
+        {
+          "id": "vilpulkas-pag",
+          "name": "Vilpulkas pag."
+        },
+        {
+          "id": "zilakalna-pag",
+          "name": "Zilākalna pag."
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
+      "name": "Ventspils un rajons",
+      "slug": "ventspils-and-reg",
+      "districts": [
+        {
+          "id": "piltene",
+          "name": "Piltene"
+        },
+        {
+          "id": "ventspils",
+          "name": "Ventspils"
+        },
+        {
+          "id": "jurkalnes-pag",
+          "name": "Jūrkalnes pag."
+        },
+        {
+          "id": "piltenes-l-t",
+          "name": "Piltenes l. t."
+        },
+        {
+          "id": "popes-pag",
+          "name": "Popes pag."
+        },
+        {
+          "id": "targales-pag",
+          "name": "Tārgales pag."
+        },
+        {
+          "id": "ugales-pag",
+          "name": "Ugāles pag."
+        },
+        {
+          "id": "usmas-pag",
+          "name": "Usmas pag."
+        },
+        {
+          "id": "uzavas-pag",
+          "name": "Užavas pag."
+        },
+        {
+          "id": "varves-pag",
+          "name": "Vārves pag."
+        },
+        {
+          "id": "ziru-pag",
+          "name": "Ziru pag."
+        }
+      ]
+    },
+    {
+      "name": "Cits",
+      "slug": "other"
+    },
+    {
+      "name": "Dzīvokļi ārpus Latvijas",
+      "slug": "flats-abroad-latvia"
+    }
+  ]
+}

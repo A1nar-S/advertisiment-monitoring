@@ -1,38 +1,68 @@
-# Copy to config/users.yaml (gitignored) and run `go run ./cmd/admin seed`;
-# the matcher also loads it on start (USERS_FILE). Re-running updates, it never
-# deletes: set `enabled: false` to retire a search.
+# Copy to config/users.yaml (gitignored): `make users`. The matcher loads it on
+# start; after editing run `make reload-users`. Re-running updates, it never
+# deletes: set `enabled: false` to retire a search. A typo in a car filter
+# stops the matcher with a "did you mean" error (`make logs`).
 users:
-  - name: alice
+  - name: me
     channels:
       - kind: discord
-        target: "123456789012345678" # Discord channel ID
+        target: "123456789012345678" # Discord channel ID (Developer Mode -> right-click channel -> Copy ID)
     searches:
-      - name: Centrs, 1-2 rooms
-        # A feed is an ss.com category path below /lv/. For real estate it ends
-        # in a deal: hand_over (rent out) | sell | buy | rent | exchange.
-        # Fewer distinct feeds = fewer requests to ss.com; many districts of one
-        # city are merged into the city-wide feed automatically.
-        feeds:
-          - real-estate/flats/riga/centre/hand_over
-          - real-estate/flats/riga/teika/hand_over
-        # Filters run locally on what the feeds return, so they cost no requests.
-        # {min, max} bounds a number, a list allows only those strings, and
-        # "price" is the listing price. Keys are the source's attributes (below).
+      # --- Cars -------------------------------------------------------------
+      # One feed for all cars: a single ss.com request every few minutes covers
+      # every car search of every user. Filters run locally and use the field
+      # and option names of https://www.ss.com/lv/transport/cars/search/
+      # (case and diacritics do not matter: "automats" = "Automāts").
+      - name: Parents – automatic estate
+        feeds: [transport/cars]
         filters:
+          make: [Skoda, Toyota, Volkswagen]
+          model: [Octavia, Superb, Avensis, "Passat*"] # of the makes above; "Passat*" = every Passat generation
+          year: {min: 2012}
+          price: {max: 7000}
+          mileage_km: {max: 220000}
+          engine_l: {min: 1.4}
+          fuel: [Dīzelis, Benzīns, Hibrīds]
+          gearbox: [Automāts]       # from the ad page (see below)
+          body: [Universāls]        # from the ad page
+
+      - name: Cheap diesel Audi A4
+        feeds: [transport/cars]
+        filters:
+          make: [Audi]
+          model: [A4]
+          year: {min: 2010}
+          price: {max: 8000}
+          fuel: [Dīzelis]
+
+      # --- Flats ------------------------------------------------------------
+      # Written like https://www.ss.com/lv/real-estate/flats/search/. Region,
+      # district and deal pick the ss.com feeds (one request each, shared by
+      # everyone watching the same area; more than 3 districts of a city are
+      # merged into the city-wide feed). The rest are filters.
+      - name: Rent in Centrs or Teika, 1-2 rooms
+        enabled: false
+        feeds: [real-estate/flats]
+        filters:
+          region: Rīga
+          district: [Centrs, Teika]  # leave out for the whole region
+          deal: Izīrē                # Izīrē (for rent) | Pārdod (for sale) | Īrē | Pērk | Maina
           price: {min: 250, max: 430}
           rooms: {min: 1, max: 2}
           area_m2: {min: 30}
-          series: [] # empty = any
+          floor: {min: 2}
+          series: [Jaun., Specpr., 119.] # dots optional
+          house_type: [Ķieģeļu, Mūra] # from the ad page
 
-      - name: Audi A4, 2010+
-        feeds: [transport/cars/audi/a4]
-        filters:
-          price: {max: 8000}
-          year: {min: 2010}
-          mileage_km: {max: 250000}
-          fuel: [D]
-
-# Attributes ss.com provides, by category:
-#   flats: rooms, area_m2, floor, series, district, address
-#   cars:  year, engine_l, fuel (D diesel, H hybrid, ...), mileage_km, model
-# A listing that lacks an attribute fails only the filters that mention it.
+# Car filters (codebook: internal/scraping/ss/codebook/cars.json):
+#   from the feed list, free:  make, model, year, engine_l, fuel, mileage_km, price
+#   from the ad page:          gearbox, body, color, seats, inspection (Jā/Nav),
+#                              equipment: [Kondicionieris, "Sēdekļi: Apsildāmi", ...] (must have all)
+# Flat filters (codebook: internal/scraping/ss/codebook/flats.json):
+#   feeds:     region, district, deal
+#   free:      price, rooms, area_m2, floor, floors (floors in the house), series
+#   ad page:   house_type
+# Ad pages are read only for new ads that already pass the free filters, once
+# per ad however many searches ask. Ranges: {min, max}; lists: any of. A
+# listing that lacks an attribute fails only the filters that mention it.
+# Full feed paths (real-estate/flats/riga/centre/hand_over) also still work.

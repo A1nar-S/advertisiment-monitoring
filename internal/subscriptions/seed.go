@@ -3,12 +3,14 @@ package subscriptions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions/subscriptionsdb"
 )
 
@@ -75,8 +77,15 @@ func (s *Service) SeedFromFile(ctx context.Context, path string) error {
 					return fail("feeds is required")
 				}
 				source := orDefault(sr.Source, "ss.com")
-				if _, err := s.sources.Get(source); err != nil {
+				src, err := s.sources.Get(source)
+				if err != nil {
 					return fail("%v", err)
+				}
+				feeds, raw := sr.Feeds, sr.Filters
+				if n, ok := src.(sources.SearchNormalizer); ok {
+					if feeds, raw, err = n.NormalizeSearch(sr.Feeds, raw); err != nil {
+						return fail("%v", err)
+					}
 				}
 				cid := first
 				if sr.Channel != "" {
@@ -87,14 +96,14 @@ func (s *Service) SeedFromFile(ctx context.Context, path string) error {
 				if cid == 0 {
 					return fail("user has no channels")
 				}
-				filters, err := parseFilters(sr.Filters)
+				filters, err := parseFilters(raw)
 				if err != nil {
 					return fail("%v", err)
 				}
 				fj, _ := json.Marshal(filters)
 				err = q.UpsertSearch(ctx, subscriptionsdb.UpsertSearchParams{
 					UserID: uid, ChannelID: cid, Name: sr.Name, Enabled: sr.Enabled == nil || *sr.Enabled,
-					Source: source, Feeds: sr.Feeds, Filters: fj,
+					Source: source, Feeds: feeds, Filters: fj,
 				})
 				if err != nil {
 					return fail("%v", err)
@@ -105,13 +114,70 @@ func (s *Service) SeedFromFile(ctx context.Context, path string) error {
 	})
 }
 
+// ValidateFile checks a users file without a database: syntax, sources,
+// channels and every search's filters (with the source's own vocabulary
+// check). It reports every bad search, not just the first.
+func ValidateFile(reg sources.Registry, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var f File
+	if err := yaml.UnmarshalWithOptions(raw, &f, yaml.Strict()); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	var errs []error
+	for _, u := range f.Users {
+		if len(u.Channels) == 0 {
+			errs = append(errs, fmt.Errorf("user %s: no channels", u.Name))
+		}
+		for _, sr := range u.Searches {
+			fail := func(err error) { errs = append(errs, fmt.Errorf("user %s search %q: %w", u.Name, sr.Name, err)) }
+			if len(sr.Feeds) == 0 {
+				fail(errors.New("feeds is required"))
+				continue
+			}
+			src, err := reg.Get(orDefault(sr.Source, "ss.com"))
+			if err != nil {
+				fail(err)
+				continue
+			}
+			filters := sr.Filters
+			if n, ok := src.(sources.SearchNormalizer); ok {
+				if _, filters, err = n.NormalizeSearch(sr.Feeds, filters); err != nil {
+					fail(err)
+					continue
+				}
+			}
+			if _, err := parseFilters(filters); err != nil {
+				fail(err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // parseFilters reads the loosely typed YAML filters map: a mapping with
-// min/max is a numeric range, a list is a set of allowed strings.
+// min/max is a numeric range, {all: [...]} a list attr that must hold every
+// value, and a list a set of allowed strings.
 func parseFilters(in map[string]any) (Filters, error) {
 	var f Filters
 	for key, v := range in {
 		switch t := v.(type) {
 		case map[string]any:
+			if all, ok := t["all"]; ok && len(t) == 1 {
+				vals, ok := all.([]any)
+				if !ok {
+					return f, fmt.Errorf("filter %q: all: expects a list", key)
+				}
+				if f.AllOf == nil {
+					f.AllOf = map[string][]string{}
+				}
+				for _, e := range vals {
+					f.AllOf[key] = append(f.AllOf[key], fmt.Sprint(e))
+				}
+				continue
+			}
 			var r Range
 			for k, bound := range t {
 				n, ok := toFloat(bound)

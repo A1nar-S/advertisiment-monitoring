@@ -18,6 +18,7 @@ var fixtureFeeds = map[string]string{
 	"testdata/feed_city.html":       "real-estate/flats/riga/all/hand_over",
 	"testdata/feed_cars_model.html": "transport/cars/audi/a4",
 	"testdata/feed_cars_make.html":  "transport/cars/audi",
+	"testdata/feed_cars_all.html":   "transport/cars",
 }
 
 func headerNames(t *testing.T, path string) []string {

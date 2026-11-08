@@ -2,7 +2,9 @@
 //
 //	admin migrate
 //	admin seed
-//	admin purge [-older-than 168h]
+//	admin check          (validate USERS_FILE, no database needed)
+//	admin purge [-older-than 1440h]
+//	admin ss-codebook [-only cars|flats]
 package main
 
 import (
@@ -12,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -22,6 +25,7 @@ import (
 	"github.com/A1nar-S/advertisiment-monitoring/internal/notifications"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/platform/config"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/platform/db"
+	"github.com/A1nar-S/advertisiment-monitoring/internal/scraping/ss"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions"
 )
 
@@ -36,9 +40,15 @@ func run() error {
 	_ = godotenv.Load() // optional
 
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: admin migrate | seed | purge [-older-than 168h]")
+		return fmt.Errorf("usage: admin migrate | seed | check | purge [-older-than 1440h] | ss-codebook [-only cars|flats]")
 	}
 	cmd, args := os.Args[1], os.Args[2:]
+	if cmd == "ss-codebook" {
+		return ssCodebook(args) // needs no database
+	}
+	if cmd == "check" {
+		return check() // needs no database
+	}
 
 	cfg, err := config.AdminFromEnv()
 	if err != nil {
@@ -54,7 +64,7 @@ func run() error {
 	defer pool.Close()
 
 	store := listings.NewService(pool, listings.DefaultSeedWindow)
-	subs := subscriptions.NewService(pool, app.KnownSources(0), cfg.FeedCollapseAt)
+	subs := subscriptions.NewService(pool, app.KnownSources(0, 0), cfg.FeedCollapseAt)
 	// No Notifier is needed for maintenance, only the deliveries table.
 	notify := notifications.NewService(pool, 0)
 	for _, m := range []func(context.Context) error{store.Migrate, subs.Migrate, notify.Migrate} {
@@ -98,4 +108,58 @@ func run() error {
 		return nil
 	}
 	return fmt.Errorf("unknown command %q", cmd)
+}
+
+// ssCodebook refreshes the ss.com codebook snapshots (cars, flats) from the
+// live search forms: about one request per make or region, REQUEST_GAP_SECONDS
+// apart.
+func ssCodebook(args []string) error {
+	fs := flag.NewFlagSet("ss-codebook", flag.ExitOnError)
+	dir := fs.String("dir", "internal/scraping/ss/codebook", "where to write the snapshots")
+	only := fs.String("only", "", "cars or flats; empty = both")
+	_ = fs.Parse(args)
+
+	sc, err := config.ScraperFromEnv()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	c := ss.NewClient(sc.RequestTimeout)
+
+	builds := map[string]func(context.Context, time.Duration) (*ss.Codebook, error){
+		"cars": c.BuildCarsCodebook, "flats": c.BuildFlatsCodebook,
+	}
+	for _, name := range []string{"cars", "flats"} {
+		if *only != "" && *only != name {
+			continue
+		}
+		cb, err := builds[name](ctx, sc.RequestGap)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		raw, err := cb.MarshalIndent()
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(*dir, name+".json")
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			return err
+		}
+		slog.Info("wrote codebook", "file", path, "fields", len(cb.Fields), "makes", len(cb.Makes), "regions", len(cb.Regions))
+	}
+	return nil
+}
+
+// check validates the users file: every search, with "did you mean" hints.
+func check() error {
+	path := os.Getenv("USERS_FILE")
+	if path == "" {
+		path = "config/users.yaml"
+	}
+	if err := subscriptions.ValidateFile(app.KnownSources(0, 0), path); err != nil {
+		return err
+	}
+	slog.Info("users file is valid", "file", path)
+	return nil
 }

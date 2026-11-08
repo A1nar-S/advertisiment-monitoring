@@ -7,19 +7,103 @@ package notificationsdb
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimDelivery = `-- name: ClaimDelivery :execrows
-INSERT INTO deliveries (key) VALUES ($1) ON CONFLICT DO NOTHING
+INSERT INTO deliveries (key, user_id, search_name) VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING
 `
 
+type ClaimDeliveryParams struct {
+	Key        string
+	UserID     *int64
+	SearchName *string
+}
+
 // Zero rows affected means another attempt already claimed this key.
-func (q *Queries) ClaimDelivery(ctx context.Context, key string) (int64, error) {
-	result, err := q.db.Exec(ctx, claimDelivery, key)
+func (q *Queries) ClaimDelivery(ctx context.Context, arg ClaimDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimDelivery, arg.Key, arg.UserID, arg.SearchName)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const countRecentSent = `-- name: CountRecentSent :one
+SELECT count(*) FROM deliveries
+WHERE user_id = $1 AND search_name = $2 AND NOT digested AND key <> $3
+  AND delivered_at > now() - make_interval(secs => $4::float8)
+`
+
+type CountRecentSentParams struct {
+	UserID        *int64
+	SearchName    *string
+	Key           string
+	WindowSeconds float64
+}
+
+// Ad messages this search sent on its own (not in a digest) within the window,
+// not counting the delivery being decided right now.
+func (q *Queries) CountRecentSent(ctx context.Context, arg CountRecentSentParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentSent,
+		arg.UserID,
+		arg.SearchName,
+		arg.Key,
+		arg.WindowSeconds,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const dueDigests = `-- name: DueDigests :many
+SELECT user_id, search_name, channel_kind, channel_target FROM digest_queue
+GROUP BY user_id, search_name, channel_kind, channel_target
+HAVING min(queued_at) < now() - make_interval(secs => $1::float8)
+`
+
+type DueDigestsRow struct {
+	UserID        int64
+	SearchName    string
+	ChannelKind   string
+	ChannelTarget string
+}
+
+// Searches whose oldest queued ad has waited a full window.
+func (q *Queries) DueDigests(ctx context.Context, windowSeconds float64) ([]DueDigestsRow, error) {
+	rows, err := q.db.Query(ctx, dueDigests, windowSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DueDigestsRow
+	for rows.Next() {
+		var i DueDigestsRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.SearchName,
+			&i.ChannelKind,
+			&i.ChannelTarget,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markDigested = `-- name: MarkDigested :exec
+UPDATE deliveries SET digested = TRUE WHERE key = $1
+`
+
+func (q *Queries) MarkDigested(ctx context.Context, key string) error {
+	_, err := q.db.Exec(ctx, markDigested, key)
+	return err
 }
 
 const purgeDeliveries = `-- name: PurgeDeliveries :execrows
@@ -34,6 +118,33 @@ func (q *Queries) PurgeDeliveries(ctx context.Context, olderThanSeconds float64)
 	return result.RowsAffected(), nil
 }
 
+const queueDigest = `-- name: QueueDigest :exec
+INSERT INTO digest_queue (key, user_id, search_name, channel_kind, channel_target, listing)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT DO NOTHING
+`
+
+type QueueDigestParams struct {
+	Key           string
+	UserID        int64
+	SearchName    string
+	ChannelKind   string
+	ChannelTarget string
+	Listing       []byte
+}
+
+func (q *Queries) QueueDigest(ctx context.Context, arg QueueDigestParams) error {
+	_, err := q.db.Exec(ctx, queueDigest,
+		arg.Key,
+		arg.UserID,
+		arg.SearchName,
+		arg.ChannelKind,
+		arg.ChannelTarget,
+		arg.Listing,
+	)
+	return err
+}
+
 const releaseDelivery = `-- name: ReleaseDelivery :exec
 DELETE FROM deliveries WHERE key = $1
 `
@@ -41,4 +152,49 @@ DELETE FROM deliveries WHERE key = $1
 func (q *Queries) ReleaseDelivery(ctx context.Context, key string) error {
 	_, err := q.db.Exec(ctx, releaseDelivery, key)
 	return err
+}
+
+const takeDigest = `-- name: TakeDigest :many
+DELETE FROM digest_queue
+WHERE user_id = $1 AND search_name = $2 AND channel_kind = $3 AND channel_target = $4
+RETURNING listing, queued_at
+`
+
+type TakeDigestParams struct {
+	UserID        int64
+	SearchName    string
+	ChannelKind   string
+	ChannelTarget string
+}
+
+type TakeDigestRow struct {
+	Listing  []byte
+	QueuedAt pgtype.Timestamptz
+}
+
+// Removes one search's queued ads; run inside a transaction that rolls back
+// if the digest cannot be sent.
+func (q *Queries) TakeDigest(ctx context.Context, arg TakeDigestParams) ([]TakeDigestRow, error) {
+	rows, err := q.db.Query(ctx, takeDigest,
+		arg.UserID,
+		arg.SearchName,
+		arg.ChannelKind,
+		arg.ChannelTarget,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TakeDigestRow
+	for rows.Next() {
+		var i TakeDigestRow
+		if err := rows.Scan(&i.Listing, &i.QueuedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

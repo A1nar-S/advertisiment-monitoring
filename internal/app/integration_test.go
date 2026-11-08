@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -120,10 +122,11 @@ func startInfra(t *testing.T) infra {
 
 // fakeSS serves saved ss.com pages by feed, and lets a test add a new ad on top.
 type fakeSS struct {
-	mu    sync.Mutex
-	pages map[string]string // feed -> html
-	hits  map[string]int
-	srv   *httptest.Server
+	mu     sync.Mutex
+	pages  map[string]string // feed -> html
+	hits   map[string]int
+	adPage string // served for every /msg/... ad URL
+	srv    *httptest.Server
 }
 
 func newFakeSS(t *testing.T) *fakeSS {
@@ -132,6 +135,11 @@ func newFakeSS(t *testing.T) *fakeSS {
 		path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/lv/"), "/")
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if strings.HasPrefix(r.URL.Path, "/msg/") {
+			f.hits["ad pages"]++
+			_, _ = fmt.Fprint(w, f.adPage)
+			return
+		}
 		f.hits[path]++
 		html, ok := f.pages[path]
 		if !ok {
@@ -423,8 +431,192 @@ func TestPipeline(t *testing.T) {
 	}
 }
 
+func (f *fakeSS) adHits() int { return f.hitCount("ad pages") }
+
 func (f *fakeSS) hitCount(feed string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.hits[feed]
+}
+
+// --- cars: one shared feed, ad pages only for candidates, restart catch-up --
+
+const allCarsFeed = "transport/cars"
+
+var moreRe = regexp.MustCompile(`…and (\d+) more`)
+
+const carUsers = `
+users:
+  - name: parents
+    channels: [{kind: discord, target: cars-chan}]
+    searches:
+      # gearbox is only on the ad page: read it for Peugeots only.
+      - name: automatic peugeot
+        feeds: [transport/cars]
+        filters:
+          make: [peugeot]
+          gearbox: automats
+          price: {max: 8000}
+      - name: cheap opel
+        feeds: [transport/cars]
+        filters:
+          make: [Opel]
+          price: {max: 3000}
+`
+
+// layout replaces a feed page's rows with the given IDs: an ID present in
+// the all-cars fixture keeps its row, any other is a copy of like's row.
+func (f *fakeSS) layout(path, like string, ids []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	html, ok := f.pages["orig:"+allCarsFeed]
+	if !ok {
+		html = f.pages[allCarsFeed]
+		f.pages["orig:"+allCarsFeed] = html
+	}
+	rows := map[string]string{}
+	for _, m := range rowRe.FindAllStringSubmatch(html, -1) {
+		rows[m[1]] = m[0]
+	}
+	var b strings.Builder
+	for _, id := range ids {
+		if r, ok := rows[id]; ok {
+			b.WriteString(r)
+		} else {
+			b.WriteString(strings.ReplaceAll(rows[like], like, id))
+		}
+	}
+	all := rowRe.FindAllStringIndex(html, -1)
+	start, end := all[0][0], all[len(all)-1][1]
+	f.pages[path] = html[:start] + b.String() + html[end:]
+}
+
+func TestCarsPipeline(t *testing.T) {
+	in := startInfra(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, in.pgURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	site := newFakeSS(t)
+	site.serve(allCarsFeed, "feed_cars_all.html", t)
+	ad, err := os.ReadFile(filepath.Join("..", "scraping", "ss", "testdata", "ad_car.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	site.mu.Lock()
+	site.adPage = string(ad) // an automatic Peugeot 508
+	site.mu.Unlock()
+	discord := &fakeDiscord{}
+
+	reg := sources.NewRegistry(ss.NewClient(5 * time.Second).WithBaseURL(site.srv.URL))
+	common := config.Common{DatabaseURL: in.pgURL, KafkaBrokers: in.brokers, Namespace: fmt.Sprintf("it%d", rand.Uint32())}
+	users := filepath.Join(t.TempDir(), "users.yaml")
+	if err := os.WriteFile(users, []byte(carUsers), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scraperCfg := config.Scraper{
+		Common: common, Source: "ss.com", CrawlInterval: time.Second, RequestGap: 10 * time.Millisecond, MaxPages: 3, FeedCollapseAt: 3,
+	}
+	startScraper := func() func() {
+		return run(t, "scraper", func(ctx context.Context) error { return Scraper(ctx, scraperCfg, reg) })
+	}
+	run(t, "ingest", func(ctx context.Context) error {
+		return Ingest(ctx, config.Ingest{Common: common, SeedWindow: seedWindow})
+	})
+	run(t, "matcher", func(ctx context.Context) error {
+		return Matcher(ctx, config.Matcher{Common: common, UsersFile: users, FeedCollapseAt: 3}, reg)
+	})
+	const window = 6 * time.Second
+	run(t, "notifier", func(ctx context.Context) error {
+		return Notifier(ctx, config.Notifier{Common: common, Burst: 5, BurstWindow: window}, discord)
+	})
+
+	// 1. First start: silent prefill of the one shared feed.
+	eventually(t, 60*time.Second, "matcher to seed searches", func() bool {
+		var n int
+		return pool.QueryRow(ctx, `SELECT count(*) FROM searches`).Scan(&n) == nil && n == 2
+	})
+	stopScraper := startScraper()
+	eventually(t, 60*time.Second, "30 cars prefilled", func() bool { return countListings(t, pool) == 30 })
+	time.Sleep(seedWindow + time.Second)
+	if n := len(discord.listings()); n != 0 || site.adHits() != 0 {
+		t.Fatalf("prefill: %d notifications, %d ad pages read; want 0, 0", n, site.adHits())
+	}
+
+	// 2. A new Peugeot: its ad page is read once; it is automatic, so alert.
+	site.addAd(allCarsFeed, "58220110", "99100001")
+	eventually(t, 60*time.Second, "automatic peugeot alert", func() bool { return len(discord.listings()) == 1 })
+	// 3. A new cheap Opel: alert without reading its ad page (the Peugeot
+	// search already fails on make).
+	site.addAd(allCarsFeed, "58269130", "99100002")
+	eventually(t, 60*time.Second, "cheap opel alert", func() bool { return len(discord.listings()) == 2 })
+	consistently(t, 2*time.Second, "no extra alerts", func() bool { return len(discord.listings()) == 2 })
+	if site.adHits() != 1 {
+		t.Errorf("ad pages read = %d, want 1 (only the Peugeot candidate)", site.adHits())
+	}
+
+	// 4. Scraper down while 45 cheap Opels are posted, with an old ad bumped
+	// to the top. On restart it must page until it meets known ads and
+	// announce all 45 exactly once: at most 5 one by one, the rest in digests.
+	stopScraper()
+	var fresh []string
+	for i := range 45 {
+		fresh = append(fresh, fmt.Sprintf("992%05d", i))
+	}
+	page1 := append([]string{"58186104"}, fresh[:29]...) // bumped BMW on top
+	page2 := append(slices.Clone(fresh[29:]), "99100002", "99100001", "58218253", "58269130")
+	site.layout(allCarsFeed+"/page2.html", "58269130", page2)
+	site.layout(allCarsFeed, "58269130", page1)
+	startScraper()
+
+	announced := func() (single, inDigest int) {
+		for _, s := range discord.listings() {
+			if strings.HasPrefix(s.listingID, "992") {
+				single++
+			}
+		}
+		discord.mu.Lock()
+		defer discord.mu.Unlock()
+		for _, s := range discord.sent {
+			if strings.Contains(s.text, "cheap opel") || strings.HasPrefix(s.text, "• ") {
+				inDigest += strings.Count("\n"+s.text, "\n• ")
+				if m := moreRe.FindStringSubmatch(s.text); m != nil {
+					n, _ := strconv.Atoi(m[1])
+					inDigest += n
+				}
+			}
+		}
+		return single, inDigest
+	}
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		var queued, digested int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM digest_queue`).Scan(&queued)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM deliveries WHERE digested`).Scan(&digested)
+		single, inDigest := announced()
+		t.Logf("single=%d inDigest=%d queued=%d digested=%d", single, inDigest, queued, digested)
+		discord.mu.Lock()
+		defer discord.mu.Unlock()
+		for _, s := range discord.sent {
+			if s.text != "" {
+				t.Logf("text: %.300q", s.text)
+			}
+		}
+	})
+	eventually(t, 90*time.Second, "all 45 announced", func() bool {
+		single, digest := announced()
+		return single+digest >= 45
+	})
+	consistently(t, window+2*time.Second, "no duplicates", func() bool {
+		single, digest := announced()
+		return single+digest == 45
+	})
+	if single, _ := announced(); single > 10 {
+		t.Errorf("burst: %d single messages, want at most 10 (the rest digested)", single)
+	}
 }
