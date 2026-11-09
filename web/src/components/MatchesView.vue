@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ArrowUpRight, Bell, CircleAlert, ImageOff } from 'lucide-vue-next'
+import EmptyState from './EmptyState.vue'
+import PageHeader from './PageHeader.vue'
 import { api, ApiError, type Match } from '../api'
 
 const matches = ref<Match[]>([])
@@ -8,14 +10,37 @@ const error = ref('')
 const loading = ref(true)
 const broken = ref(new Set<string>())
 
-function when(at: string) {
-  return new Date(at).toLocaleString([], {
+const dayKey = (at: string) => new Date(at).toDateString()
+
+function dayLabel(at: string) {
+  const date = new Date(at)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  if (date.toDateString() === today.toDateString()) return 'Today'
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return date.toLocaleDateString([], {
+    weekday: 'long',
     day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
+    month: 'long',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
   })
 }
+
+const time = (at: string) =>
+  new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+// Matches arrive newest first; group them under one heading per day.
+const days = computed(() => {
+  const groups: { key: string; label: string; items: Match[] }[] = []
+  for (const m of matches.value) {
+    const key = dayKey(m.at)
+    const last = groups.at(-1)
+    if (last?.key === key) last.items.push(m)
+    else groups.push({ key, label: dayLabel(m.at), items: [m] })
+  }
+  return groups
+})
 
 onMounted(async () => {
   try {
@@ -33,73 +58,118 @@ onMounted(async () => {
 
 <template>
   <section>
-    <h1 class="mb-1 text-2xl font-semibold text-zinc-900">Your alerts</h1>
-    <p class="mb-6 text-sm text-zinc-500">
-      The latest ads your searches told you about.
-    </p>
+    <PageHeader
+      title="Alerts"
+      description="The latest ads your searches found, newest first."
+    />
 
-    <div
-      v-if="error"
-      role="alert"
-      class="mb-5 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
-    >
-      <CircleAlert :size="16" class="mt-0.5 shrink-0" />{{ error }}
-    </div>
-    <p v-if="loading" class="text-sm text-zinc-500">Loading…</p>
-    <div
-      v-else-if="!matches.length"
-      class="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center"
-    >
-      <Bell :size="28" class="mx-auto mb-3 text-zinc-400" />
-      <p class="font-medium">No alerts yet</p>
-      <p class="mt-1 text-sm text-zinc-500">
-        They appear here as new matching ads are posted.
-      </p>
+    <div v-if="error" role="alert" class="message-bar-danger mb-6">
+      <CircleAlert :size="16" class="mt-0.5 shrink-0 text-danger-600" />{{
+        error
+      }}
     </div>
 
-    <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <li
-        v-for="m in matches"
-        :key="`${m.searchId}-${m.externalId}`"
-        class="flex gap-3 rounded-lg border border-zinc-200 bg-white p-3"
+    <div class="card overflow-clip">
+      <div
+        v-if="loading"
+        class="divide-y divide-gray-100"
+        role="status"
+        aria-label="Loading alerts"
       >
-        <div
-          class="grid size-20 shrink-0 place-items-center overflow-hidden rounded bg-zinc-100"
+        <div v-for="n in 4" :key="n" class="flex items-center gap-4 px-4 py-3">
+          <div class="skeleton h-12 w-16 rounded-md" />
+          <div class="flex-1">
+            <div class="skeleton h-4 w-72 max-w-full" />
+            <div class="skeleton mt-2 h-3 w-40" />
+          </div>
+          <div class="skeleton h-4 w-16" />
+        </div>
+      </div>
+
+      <EmptyState
+        v-else-if="!matches.length"
+        :icon="Bell"
+        title="No alerts yet"
+        description="When a new ad matches one of your searches, it shows up here and in Discord."
+      />
+
+      <template v-else>
+        <section
+          v-for="day in days"
+          :key="day.key"
+          :aria-label="day.label"
+          class="not-first:border-t not-first:border-gray-150"
         >
-          <img
-            v-if="m.listing?.imageUrl && !broken.has(m.externalId)"
-            :src="m.listing.imageUrl"
-            alt=""
-            class="size-full object-cover"
-            loading="lazy"
-            @error="broken.add(m.externalId)"
-          />
-          <ImageOff v-else :size="18" class="text-zinc-400" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="text-xs text-zinc-500">
-            {{ m.searchName }} · {{ when(m.at) }}
-          </p>
-          <template v-if="m.listing">
-            <p class="mt-1 line-clamp-2 text-sm text-zinc-800">
-              {{ m.listing.title }}
-            </p>
-            <div class="mt-1.5 flex items-center justify-between gap-2">
-              <span class="font-semibold">{{ m.listing.price }}</span>
-              <a
-                :href="m.listing.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-1 text-xs text-accent-600 hover:text-accent-700"
-                >Open<ArrowUpRight :size="12"
-              /></a>
-            </div>
-          </template>
-          <p v-else class="mt-1 text-sm text-zinc-400">
-            Ad no longer stored ({{ m.externalId }})
-          </p>
-        </div>
-      </li>
-    </ul>
+          <h2
+            class="sticky top-24 z-[1] lg:top-0 border-b border-gray-150 bg-gray-25/95 px-4 py-2 font-sans text-xs font-medium text-gray-500 backdrop-blur"
+          >
+            {{ day.label }}
+          </h2>
+          <ul class="divide-y divide-gray-100">
+            <li v-for="m in day.items" :key="`${m.searchId}-${m.externalId}`">
+              <component
+                :is="m.listing ? 'a' : 'div'"
+                :href="m.listing?.url"
+                :target="m.listing ? '_blank' : undefined"
+                :rel="m.listing ? 'noopener noreferrer' : undefined"
+                class="group flex items-center gap-4 px-4 py-3"
+                :class="{ 'transition-colors hover:bg-gray-25': m.listing }"
+              >
+                <div
+                  class="grid h-12 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-gray-100 text-gray-400"
+                >
+                  <img
+                    v-if="m.listing?.imageUrl && !broken.has(m.externalId)"
+                    :src="m.listing.imageUrl"
+                    alt=""
+                    class="size-full object-cover"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="broken.add(m.externalId)"
+                  />
+                  <ImageOff v-else :size="16" />
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <p
+                    class="truncate text-sm"
+                    :class="m.listing ? 'text-gray-900' : 'text-gray-500'"
+                  >
+                    {{ m.listing?.title ?? 'This ad is no longer stored' }}
+                  </p>
+                  <p
+                    class="mt-0.5 truncate text-small text-gray-500 tabular-nums"
+                  >
+                    {{
+                      [
+                        m.searchName,
+                        time(m.at),
+                        m.listing && !m.listing.active
+                          ? 'No longer listed'
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                    }}
+                  </p>
+                </div>
+
+                <span
+                  v-if="m.listing?.price"
+                  class="shrink-0 text-sm font-semibold text-gray-900 tabular-nums"
+                  >{{ m.listing.price }}</span
+                >
+                <ArrowUpRight
+                  v-if="m.listing"
+                  :size="16"
+                  class="shrink-0 text-gray-400 transition-colors group-hover:text-brand-600"
+                  aria-hidden="true"
+                />
+              </component>
+            </li>
+          </ul>
+        </section>
+      </template>
+    </div>
   </section>
 </template>

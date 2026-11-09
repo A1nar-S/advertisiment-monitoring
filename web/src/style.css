@@ -1,71 +1,255 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 
+/*
+ * Design tokens. One system for every screen: a cool neutral scale, one brand
+ * blue, three status colors, a fixed type scale and two-part shadows.
+ * Fonts are the platform's own: Segoe UI Variable on Windows, SF Pro on Apple.
+ */
 @theme {
-  --font-sans: 'DM Sans', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
-  --color-accent-50: #fff3ef;
-  --color-accent-100: #ffe4dc;
-  --color-accent-600: #b94b35;
-  --color-accent-700: #963c2b;
+  --font-sans:
+    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', -apple-system,
+    BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  --font-display:
+    'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', -apple-system,
+    BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', system-ui,
+    sans-serif;
+  --font-mono:
+    'Cascadia Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Greys lean slightly blue so they sit well next to the brand color. */
+  --color-gray-25: #fbfbfc;
+  --color-gray-50: #f6f7f9;
+  --color-gray-100: #eef0f3;
+  --color-gray-150: #e6e8ec;
+  --color-gray-200: #dfe2e7;
+  --color-gray-300: #cdd1d8;
+  --color-gray-400: #a3a9b3;
+  --color-gray-500: #7b828e;
+  --color-gray-600: #5d6470;
+  --color-gray-700: #444a55;
+  --color-gray-800: #2d323b;
+  --color-gray-900: #1b1e24;
+
+  --color-brand-50: #eef5fd;
+  --color-brand-100: #dbeafb;
+  --color-brand-200: #b9d6f6;
+  --color-brand-500: #2a83d6;
+  --color-brand-600: #0f6cbd;
+  --color-brand-700: #0c5ba1;
+  --color-brand-800: #0a4a84;
+
+  --color-success-50: #f0f8f1;
+  --color-success-100: #d6edd9;
+  --color-success-600: #107c41;
+  --color-success-700: #0b5f31;
+
+  --color-warning-50: #fff8ed;
+  --color-warning-100: #fdeacc;
+  --color-warning-600: #b25e09;
+  --color-warning-700: #8a4704;
+
+  --color-danger-50: #fdf3f4;
+  --color-danger-100: #f8dadd;
+  --color-danger-600: #c42b1c;
+  --color-danger-700: #a3241a;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.25rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.25rem;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.625rem;
+
+  --shadow-card: 0 0 0 1px rgb(20 28 44 / 0.06), 0 1px 2px rgb(20 28 44 / 0.06);
+  --shadow-raised:
+    0 0 0 1px rgb(20 28 44 / 0.06), 0 2px 4px rgb(20 28 44 / 0.06),
+    0 8px 16px rgb(20 28 44 / 0.08);
+  --shadow-overlay:
+    0 0 0 1px rgb(20 28 44 / 0.06), 0 8px 24px rgb(20 28 44 / 0.12),
+    0 32px 64px rgb(20 28 44 / 0.16);
+
+  --ease-decelerate: cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
 @layer base {
-  * {
-    letter-spacing: 0;
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  html:has(dialog[open]) {
+    overflow: hidden;
   }
   body {
-    @apply m-0 bg-zinc-50 font-sans text-sm text-zinc-900 antialiased;
+    @apply m-0 bg-gray-50 font-sans text-sm text-gray-900;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
   }
   button,
-  select {
+  select,
+  summary {
     @apply cursor-pointer;
   }
   button:disabled {
-    @apply cursor-default opacity-40;
-  }
-  button,
-  a,
-  input,
-  select {
-    @apply focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent-600;
+    @apply cursor-default;
   }
   button,
   input,
-  select {
+  select,
+  textarea {
     font: inherit;
+    color: inherit;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-600;
+  }
+  ::selection {
+    @apply bg-brand-100;
+  }
+  svg.lucide {
+    stroke-width: 1.75px;
   }
 }
 
-@layer components {
-  .icon-button {
-    @apply inline-flex size-8 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:hover:bg-transparent;
+/* Buttons: primary for the one main action, secondary for the rest,
+   subtle for toolbars and rows. */
+@utility btn {
+  @apply inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors duration-100 select-none disabled:pointer-events-none disabled:opacity-45;
+}
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white shadow-[0_1px_2px_rgb(15_108_189/0.25)] hover:bg-brand-700 active:bg-brand-800;
+}
+@utility btn-secondary {
+  @apply btn bg-white text-gray-900 shadow-[0_0_0_1px_var(--color-gray-200),0_1px_2px_rgb(20_28_44/0.05)] hover:bg-gray-25 hover:shadow-[0_0_0_1px_var(--color-gray-300),0_1px_2px_rgb(20_28_44/0.05)] active:bg-gray-50;
+}
+@utility btn-subtle {
+  @apply btn text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-150;
+}
+@utility btn-danger {
+  @apply btn bg-danger-600 text-white hover:bg-danger-700;
+}
+@utility btn-icon {
+  @apply inline-flex size-8 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors duration-100 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-150 disabled:pointer-events-none disabled:opacity-40;
+}
+
+/* Inputs follow Fluent: a hairline box whose bottom edge turns brand blue
+   and thickens on focus. */
+@utility field {
+  @apply h-8 w-full min-w-0 rounded-md border border-gray-200 border-b-gray-400 bg-white px-2.5 text-sm text-gray-900 transition-[border-color,box-shadow] duration-100 placeholder:text-gray-400 hover:border-gray-300 hover:border-b-gray-500 focus:border-b-brand-600 focus:shadow-[inset_0_-1px_0_var(--color-brand-600)] focus:outline-none disabled:border-gray-150 disabled:bg-gray-50 disabled:text-gray-500;
+}
+@utility field-within {
+  @apply rounded-md border border-gray-200 border-b-gray-400 bg-white transition-[border-color,box-shadow] duration-100 hover:border-gray-300 hover:border-b-gray-500 focus-within:border-b-brand-600 focus-within:shadow-[inset_0_-1px_0_var(--color-brand-600)];
+}
+select.field {
+  @apply appearance-none pr-8;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%237b828e' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+}
+@utility field-label {
+  @apply mb-1.5 block text-small font-medium text-gray-800;
+}
+@utility field-hint {
+  @apply mt-1.5 text-xs text-gray-500;
+}
+
+@utility card {
+  @apply rounded-lg bg-white shadow-card;
+}
+
+@utility badge {
+  @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium whitespace-nowrap;
+}
+@utility badge-neutral {
+  @apply badge bg-gray-100 text-gray-700;
+}
+@utility badge-success {
+  @apply badge bg-success-50 text-success-700 ring-1 ring-success-100 ring-inset;
+}
+@utility badge-warning {
+  @apply badge bg-warning-50 text-warning-700 ring-1 ring-warning-100 ring-inset;
+}
+@utility badge-brand {
+  @apply badge bg-brand-50 text-brand-700 ring-1 ring-brand-100 ring-inset;
+}
+
+@utility message-bar {
+  @apply flex items-start gap-2.5 rounded-md px-3 py-2.5 text-sm text-gray-900;
+}
+@utility message-bar-danger {
+  @apply message-bar bg-danger-50 shadow-[inset_0_0_0_1px_var(--color-danger-100)];
+}
+@utility message-bar-warning {
+  @apply message-bar bg-warning-50 shadow-[inset_0_0_0_1px_var(--color-warning-100)];
+}
+
+@utility table-head {
+  @apply h-9 px-4 text-left text-xs font-medium whitespace-nowrap text-gray-500;
+}
+
+@utility skeleton {
+  @apply animate-pulse rounded bg-gray-100;
+}
+
+@utility kbd {
+  @apply rounded border border-gray-200 bg-gray-50 px-1.5 py-px font-mono text-xs text-gray-800;
+}
+
+/* Side sheets and dialogs (BaseDialog.vue). */
+dialog.sheet,
+dialog.modal {
+  @apply max-h-none max-w-none overflow-hidden bg-white p-0 text-gray-900;
+}
+dialog.sheet {
+  @apply my-0 mr-0 ml-auto h-dvh w-full shadow-overlay sm:w-[560px];
+  animation: sheet-in 260ms var(--ease-decelerate);
+}
+dialog.modal {
+  @apply m-auto w-[calc(100%-2rem)] max-w-[420px] rounded-lg shadow-overlay;
+  animation: modal-in 200ms var(--ease-decelerate);
+}
+dialog.sheet::backdrop,
+dialog.modal::backdrop {
+  background: rgb(16 20 28 / 0.32);
+  animation: fade-in 200ms ease-out;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
   }
-  .button {
-    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 shadow-xs transition-colors hover:bg-zinc-50;
+}
+@keyframes modal-in {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
   }
-  .status-badge {
-    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium;
-  }
-  .table-head {
-    @apply px-4 py-3 text-left text-xs font-medium text-zinc-500;
-  }
-  .table-cell {
-    @apply px-4 py-4 align-middle;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
 }
 
-.empty-grid {
-  background-image:
-    linear-gradient(#e4e4e780 1px, transparent 1px),
-    linear-gradient(90deg, #e4e4e780 1px, transparent 1px);
-  background-size: 24px 24px;
-  mask-image: radial-gradient(ellipse, black 5%, transparent 68%);
-}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after {
+  *::after,
+  ::backdrop {
     animation: none !important;
     transition: none !important;
   }

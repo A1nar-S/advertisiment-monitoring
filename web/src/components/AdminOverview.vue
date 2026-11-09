@@ -1,29 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
-  Activity,
-  ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
-  Bell,
-  Building2,
-  CarFront,
-  Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   Database,
-  Globe2,
   ImageOff,
   Layers3,
-  Radio,
   RefreshCw,
   Search,
-  SearchCheck,
-  ShieldCheck,
-  Users,
+  SlidersHorizontal,
   X,
 } from 'lucide-vue-next'
+import BaseDialog from './BaseDialog.vue'
+import EmptyState from './EmptyState.vue'
+import PageHeader from './PageHeader.vue'
 
 type Listing = {
   id: number
@@ -72,15 +64,15 @@ const query = ref('')
 const source = ref('all')
 const category = ref<'all' | 'cars' | 'flats'>('all')
 const categoryOptions = [
-  { value: 'all', label: 'All', icon: Layers3 },
-  { value: 'cars', label: 'Cars', icon: CarFront },
-  { value: 'flats', label: 'Flats', icon: Building2 },
+  { value: 'all', label: 'All' },
+  { value: 'cars', label: 'Cars' },
+  { value: 'flats', label: 'Flats' },
 ] as const
 const status = ref('all')
 const sort = ref('newest')
 const page = ref(1)
-const expanded = ref<number | null>(null)
-const expandedListing = ref<number | null>(null)
+const openListing = ref<Listing | null>(null)
+const openSearch = ref<SavedSearch | null>(null)
 const failedImages = ref(new Set<number>())
 const pageSize = 20
 let timer: ReturnType<typeof setInterval> | undefined
@@ -169,52 +161,50 @@ const visibleListings = computed(() =>
     page.value * pageSize,
   ),
 )
-const selectedListing = computed(
-  () =>
-    visibleListings.value.find(
-      (listing) => listing.id === expandedListing.value,
-    ) ?? null,
-)
 const visibleSearches = computed(() =>
   filteredSearches.value.slice(
     (page.value - 1) * pageSize,
     page.value * pageSize,
   ),
 )
-const metrics = computed(() => [
-  {
-    name: 'Active listings',
-    value: data.value?.stats.activeListings,
-    detail: `${data.value?.stats.listings ?? 0} collected in total`,
-    icon: Layers3,
-  },
-  {
-    name: 'New today',
-    value: data.value?.stats.newToday,
-    detail: 'Since 00:00 UTC',
-    icon: Activity,
-  },
-  {
-    name: 'Search matches',
-    value: data.value?.stats.matches,
-    detail: `${data.value?.stats.enabledSearches ?? 0} enabled searches`,
-    icon: SearchCheck,
-  },
-  {
-    name: 'Notifications',
-    value: data.value?.stats.deliveries,
-    detail: 'Recorded deliveries',
-    icon: Bell,
-  },
-])
+const metrics = computed(() => {
+  const stats = data.value?.stats
+  return [
+    {
+      name: 'Active listings',
+      value: stats?.activeListings,
+      detail: `of ${(stats?.listings ?? 0).toLocaleString()} collected`,
+    },
+    {
+      name: 'New today',
+      value: stats?.newToday,
+      detail: 'Since 00:00 UTC',
+    },
+    {
+      name: 'Search matches',
+      value: stats?.matches,
+      detail: `${stats?.enabledSearches ?? 0} of ${stats?.searches ?? 0} searches active`,
+    },
+    {
+      name: 'Notifications sent',
+      value: stats?.deliveries,
+      detail: `Across ${stats?.users ?? 0} users`,
+    },
+  ]
+})
+const updatedAt = computed(() =>
+  data.value
+    ? new Date(data.value.updatedAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '',
+)
 watch([query, source, category, status, sort, view], () => {
   page.value = 1
 })
 watch(pageCount, (value) => {
   page.value = Math.min(page.value, value)
-})
-watch([query, source, category, status, sort, view, page], () => {
-  expandedListing.value = null
 })
 
 function listingCategory(listing: Listing): 'cars' | 'flats' | undefined {
@@ -245,21 +235,23 @@ const attributeLabels: Record<string, string> = {
   district: 'District',
   address: 'Address',
 }
+const humanize = (key: string) =>
+  attributeLabels[key] ??
+  key.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+
 const listingAttributes = computed(() =>
-  Object.entries(selectedListing.value?.attrs ?? {})
+  Object.entries(openListing.value?.attrs ?? {})
     .filter(
       ([key, value]) => key !== 'description' && value !== null && value !== '',
     )
     .map(([key, value]) => ({
       key,
-      label:
-        attributeLabels[key] ??
-        key.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase()),
+      label: humanize(key),
       value: formatAttribute(key, value),
     })),
 )
 const description = computed(() => {
-  const value = selectedListing.value?.attrs?.description
+  const value = openListing.value?.attrs?.description
   return typeof value === 'string' && value.trim() ? value : null
 })
 
@@ -285,24 +277,27 @@ function formatAttribute(key: string, value: unknown): string {
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
-function toggleListing(listing: Listing) {
-  expandedListing.value =
-    expandedListing.value === listing.id ? null : listing.id
-}
-function closeListing() {
-  const listingID = expandedListing.value
-  expandedListing.value = null
-  void nextTick(() =>
-    document
-      .getElementById(`listing-toggle-${listingID}`)
-      ?.focus({ preventScroll: true }),
-  )
-}
-function handleEscape(event: KeyboardEvent) {
-  if (event.key === 'Escape' && expandedListing.value !== null) {
-    event.preventDefault()
-    closeListing()
-  }
+
+// A saved search's filters as readable rows: lists joined, ranges as a–b.
+function filterRows(filters: Record<string, unknown>) {
+  return Object.entries(filters).map(([key, value]) => {
+    const n = (v: number) =>
+      v.toLocaleString(undefined, { useGrouping: key !== 'year' })
+    let text: string
+    if (Array.isArray(value)) text = value.join(', ')
+    else if (value && typeof value === 'object') {
+      const { min, max } = value as { min?: number; max?: number }
+      text =
+        min !== undefined && max !== undefined
+          ? `${n(min)} – ${n(max)}`
+          : min !== undefined
+            ? `${n(min)} or more`
+            : max !== undefined
+              ? `Up to ${n(max)}`
+              : JSON.stringify(value)
+    } else text = String(value)
+    return { key, label: humanize(key), value: text }
+  })
 }
 
 function safeURL(value: string) {
@@ -327,795 +322,598 @@ function resetFilters() {
 }
 function changeView(next: 'listings' | 'searches') {
   view.value = next
-  expanded.value = null
   resetFilters()
 }
 
 onMounted(() => {
   void refresh()
   timer = setInterval(() => void refresh(), 30000)
-  window.addEventListener('keydown', handleEscape)
 })
 onUnmounted(() => {
   clearInterval(timer)
   controller?.abort()
-  window.removeEventListener('keydown', handleEscape)
 })
 </script>
 
 <template>
-  <div class="min-h-screen">
-    <header class="border-b border-zinc-200 bg-white">
-      <nav
-        aria-label="Main navigation"
-        class="mx-auto flex max-w-[1328px] items-center gap-7 px-5 sm:px-8 lg:px-12"
-      >
-        <button
-          v-for="item in [
-            {
-              id: 'listings' as const,
-              label: 'Listings',
-              icon: Layers3,
-              count: data?.stats.listings,
-            },
-            {
-              id: 'searches' as const,
-              label: 'Saved searches',
-              icon: SearchCheck,
-              count: data?.stats.searches,
-            },
-          ]"
-          :key="item.id"
-          :aria-current="view === item.id ? 'page' : undefined"
-          class="-mb-px flex h-12 items-center gap-2 border-b-2 text-sm transition-colors"
-          :class="
-            view === item.id
-              ? 'border-accent-600 font-semibold text-zinc-900'
-              : 'border-transparent text-zinc-500 hover:text-zinc-900'
-          "
-          @click="changeView(item.id)"
-        >
-          <component :is="item.icon" :size="16" /><span>{{ item.label }}</span
-          ><span
-            class="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] font-normal text-zinc-500"
-            >{{ item.count ?? '-' }}</span
-          >
-        </button>
-        <span
-          class="ml-auto hidden items-center gap-1.5 text-xs text-zinc-500 md:flex"
-          ><Users :size="14" />{{ data?.stats.users ?? '-' }} users</span
-        >
-      </nav>
-    </header>
-
-    <main
-      class="mx-auto max-w-[1328px] px-5 pt-9 pb-6 sm:px-8 lg:px-12 lg:pt-12"
+  <section>
+    <PageHeader
+      title="Overview"
+      description="Everything the monitor has collected, across all users."
     >
-      <div class="mb-8 flex items-end justify-between gap-4">
-        <div>
-          <p class="mb-2 flex items-center gap-1.5 text-xs text-zinc-500">
-            Workspace<ChevronRight :size="12" />Monitoring
-          </p>
-          <h1 class="text-2xl font-semibold text-zinc-900">
-            {{ view === 'listings' ? 'Listing activity' : 'Saved searches' }}
-          </h1>
-        </div>
-        <div class="flex items-center gap-4">
-          <span v-if="data" class="hidden text-xs text-zinc-500 md:block"
-            >Last synced
-            <span class="ml-1 font-mono text-zinc-700">{{
-              new Date(data.updatedAt).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })
-            }}</span></span
-          ><button class="button" :disabled="loading" @click="refresh">
-            <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />Refresh
-          </button>
-        </div>
+      <span v-if="data" class="mr-2 hidden text-small text-gray-500 sm:inline"
+        >Updated <span class="tabular-nums">{{ updatedAt }}</span></span
+      >
+      <button class="btn-secondary" :disabled="loading" @click="refresh">
+        <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />Refresh
+      </button>
+    </PageHeader>
+
+    <div v-if="error" role="alert" class="message-bar-danger mb-6">
+      <CircleAlert :size="16" class="mt-0.5 shrink-0 text-danger-600" />
+      <span class="flex-1"
+        >{{ error
+        }}<template v-if="data"> Showing the last loaded data.</template></span
+      >
+    </div>
+
+    <section
+      aria-label="Totals"
+      class="grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-gray-150 shadow-card md:grid-cols-4"
+    >
+      <div v-for="metric in metrics" :key="metric.name" class="bg-white p-5">
+        <p class="text-small text-gray-600">{{ metric.name }}</p>
+        <p
+          v-if="metric.value !== undefined"
+          class="mt-1 font-display text-display font-semibold tracking-[-0.015em] text-gray-900 tabular-nums"
+        >
+          {{ metric.value.toLocaleString() }}
+        </p>
+        <div v-else class="skeleton mt-2 mb-1 h-7 w-16" />
+        <p class="mt-1 truncate text-xs text-gray-500">{{ metric.detail }}</p>
       </div>
+    </section>
+
+    <div
+      class="mt-10 flex gap-6 border-b border-gray-200"
+      role="tablist"
+      aria-label="Records"
+    >
+      <button
+        v-for="item in [
+          {
+            id: 'listings' as const,
+            label: 'Listings',
+            count: data?.stats.listings,
+          },
+          {
+            id: 'searches' as const,
+            label: 'Saved searches',
+            count: data?.stats.searches,
+          },
+        ]"
+        :key="item.id"
+        role="tab"
+        :aria-selected="view === item.id"
+        class="relative -mb-px flex h-10 items-center gap-2 text-sm transition-colors"
+        :class="
+          view === item.id
+            ? 'font-medium text-gray-900'
+            : 'text-gray-600 hover:text-gray-900'
+        "
+        @click="changeView(item.id)"
+      >
+        {{ item.label }}
+        <span
+          v-if="item.count !== undefined"
+          class="text-small font-normal text-gray-500 tabular-nums"
+          >{{ item.count.toLocaleString() }}</span
+        >
+        <span
+          v-if="view === item.id"
+          class="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-brand-600"
+          aria-hidden="true"
+        />
+      </button>
+    </div>
+
+    <div
+      v-if="loadedRecords.length"
+      class="mt-5 mb-4 flex flex-wrap items-center gap-2"
+    >
+      <label
+        class="field-within flex h-8 w-full items-center gap-2 pr-1 pl-2.5 sm:w-72"
+      >
+        <Search :size="15" class="shrink-0 text-gray-400" />
+        <input
+          v-model="query"
+          class="h-full w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-gray-400 focus-visible:outline-none"
+          :placeholder="
+            view === 'listings' ? 'Search listings' : 'Search by name or user'
+          "
+          aria-label="Search records"
+        />
+        <button
+          v-if="query"
+          class="grid size-6 shrink-0 place-items-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+          aria-label="Clear search"
+          title="Clear search"
+          @click.prevent="query = ''"
+        >
+          <X :size="14" />
+        </button>
+      </label>
 
       <div
-        v-if="error"
-        role="alert"
-        class="mb-6 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+        v-if="view === 'listings'"
+        class="flex rounded-md bg-gray-150/80 p-0.5"
+        role="group"
+        aria-label="Category"
       >
-        <CircleAlert :size="18" class="mt-0.5 shrink-0" /><span
-          >{{ error
-          }}<template v-if="data">
-            Showing the last loaded data.</template
-          ></span
-        ><button
-          class="icon-button ml-auto"
-          aria-label="Retry loading data"
-          title="Retry loading data"
-          :disabled="loading"
-          @click="refresh"
+        <button
+          v-for="option in categoryOptions"
+          :key="option.value"
+          :aria-pressed="category === option.value"
+          class="h-7 rounded-[5px] px-3 text-small transition-colors"
+          :class="
+            category === option.value
+              ? 'bg-white font-medium text-gray-900 shadow-card'
+              : 'text-gray-600 hover:text-gray-900'
+          "
+          @click="category = option.value"
         >
-          <RefreshCw :size="16" />
+          {{ option.label }}
         </button>
       </div>
 
-      <section
-        aria-label="Monitoring totals"
-        class="mb-10 grid grid-cols-2 gap-y-7 border-b border-zinc-200 pb-8 md:grid-cols-4"
+      <select v-model="status" class="field w-auto" aria-label="Status">
+        <option value="all">Any status</option>
+        <option value="active">
+          {{ view === 'listings' ? 'Active' : 'Enabled' }}
+        </option>
+        <option value="inactive">
+          {{ view === 'listings' ? 'Inactive' : 'Paused' }}
+        </option>
+      </select>
+      <select
+        v-if="sources.length > 1"
+        v-model="source"
+        class="field w-auto"
+        aria-label="Source"
       >
-        <article
-          v-for="(metric, index) in metrics"
-          :key="metric.name"
-          class="min-w-0 pr-4"
-          :class="
-            index % 2 === 1
-              ? 'border-l border-zinc-200 pl-5 md:pl-8'
-              : index > 0
-                ? 'md:border-l md:border-zinc-200 md:pl-8'
-                : ''
-          "
-        >
-          <div class="mb-3 flex items-center gap-2 text-xs text-zinc-500">
-            <component
-              :is="metric.icon"
-              :size="15"
-              class="shrink-0 text-zinc-400"
-            />{{ metric.name }}
-          </div>
-          <p class="text-3xl leading-none font-semibold tabular-nums">
-            {{ metric.value?.toLocaleString() ?? '-' }}
-          </p>
-          <p class="mt-2 text-xs text-zinc-500">{{ metric.detail }}</p>
-        </article>
-      </section>
-
-      <section
-        :aria-label="view === 'listings' ? 'Recent listings' : 'Saved searches'"
-        :aria-busy="loading"
+        <option value="all">All sources</option>
+        <option v-for="item in sources" :key="item" :value="item">
+          {{ item }}
+        </option>
+      </select>
+      <button v-if="hasFilters" class="btn-subtle" @click="resetFilters">
+        Clear filters
+      </button>
+      <select
+        v-if="view === 'listings'"
+        v-model="sort"
+        class="field w-auto sm:ml-auto"
+        aria-label="Sort"
       >
-        <div class="mb-5 flex items-center justify-between gap-3">
-          <h2 class="flex items-center gap-2.5 text-base font-semibold">
-            {{ view === 'listings' ? 'Listing feed' : 'Search subscriptions'
-            }}<span
-              class="rounded bg-zinc-200/60 px-1.5 py-0.5 font-mono text-[11px] font-normal text-zinc-600"
-              >{{ resultCount }}</span
-            >
-          </h2>
-          <span class="text-xs text-zinc-500">Latest 100 records</span>
-        </div>
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="title">Title A–Z</option>
+      </select>
+    </div>
+    <div v-else class="mt-5" />
 
-        <template v-if="loadedRecords.length">
-          <div
-            v-if="view === 'listings'"
-            class="mb-5 flex w-fit max-w-full items-center gap-1 rounded-md bg-zinc-200/60 p-1"
-            role="group"
-            aria-label="Filter by category"
-          >
-            <button
-              v-for="option in categoryOptions"
-              :key="option.value"
-              :aria-pressed="category === option.value"
-              class="flex h-8 items-center justify-center gap-2 rounded px-3 text-xs transition-colors sm:px-4"
-              :class="
-                category === option.value
-                  ? 'bg-white font-semibold text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:bg-white/50 hover:text-zinc-800'
-              "
-              @click="category = option.value"
-            >
-              <component :is="option.icon" :size="14" />{{ option.label }}
-            </button>
+    <div class="card overflow-hidden" :aria-busy="loading">
+      <div
+        v-if="!data && loading"
+        class="divide-y divide-gray-100"
+        role="status"
+        aria-label="Loading"
+      >
+        <div v-for="n in 5" :key="n" class="flex items-center gap-4 px-4 py-3">
+          <div class="skeleton h-9 w-12 rounded-md" />
+          <div class="flex-1">
+            <div class="skeleton h-4 w-80 max-w-full" />
+            <div class="skeleton mt-2 h-3 w-40" />
           </div>
-          <div
-            class="mb-4 flex gap-6 border-b border-zinc-200"
-            role="group"
-            aria-label="Filter by status"
-          >
-            <button
-              v-for="option in [
-                { value: 'all', label: 'All records' },
-                {
-                  value: 'active',
-                  label: view === 'listings' ? 'Active' : 'Enabled',
-                },
-                {
-                  value: 'inactive',
-                  label: view === 'listings' ? 'Inactive' : 'Disabled',
-                },
-              ]"
-              :key="option.value"
-              :aria-pressed="status === option.value"
-              class="-mb-px border-b-2 pb-3 text-xs"
-              :class="
-                status === option.value
-                  ? 'border-accent-600 font-semibold text-zinc-900'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
-              "
-              @click="status = option.value"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-          <div class="mb-5 flex flex-wrap items-center gap-2">
-            <label
-              class="flex h-9 min-w-0 basis-full items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 focus-within:border-zinc-400 sm:max-w-sm sm:basis-auto sm:grow"
-              ><Search :size="15" class="shrink-0 text-zinc-400" /><input
-                v-model="query"
-                class="w-full min-w-0 bg-transparent text-xs outline-none placeholder:text-zinc-400"
-                :placeholder="
-                  view === 'listings'
-                    ? 'Search title, location, source...'
-                    : 'Search name, user, source...'
-                "
-                aria-label="Search records" /><button
-                v-if="query"
-                class="icon-button -mr-2"
-                title="Clear search"
-                aria-label="Clear search"
-                @click="query = ''"
-              >
-                <X :size="14" /></button
-            ></label>
-            <label
-              class="flex h-9 min-w-0 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-zinc-500 sm:ml-auto"
-              ><Globe2 :size="14" class="shrink-0" /><select
-                v-model="source"
-                aria-label="Filter by source"
-                class="h-full max-w-36 min-w-0 appearance-none bg-transparent text-xs text-zinc-700"
-              >
-                <option value="all">All sources</option>
-                <option v-for="item in sources" :key="item" :value="item">
-                  {{ item }}
-                </option></select
-              ><ChevronDown :size="12" class="pointer-events-none shrink-0"
-            /></label>
-            <label
-              v-if="view === 'listings'"
-              class="flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3"
-              ><select
-                v-model="sort"
-                aria-label="Sort listings"
-                class="h-full appearance-none bg-transparent text-xs text-zinc-700"
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="title">Title A-Z</option></select
-              ><ChevronDown
-                :size="12"
-                class="pointer-events-none text-zinc-500"
-            /></label>
-            <button
-              v-if="hasFilters"
-              class="icon-button"
-              title="Reset filters"
-              aria-label="Reset filters"
-              @click="resetFilters"
-            >
-              <X :size="15" />
-            </button>
-          </div>
-        </template>
+          <div class="skeleton h-4 w-16" />
+        </div>
+      </div>
 
-        <div
-          v-if="!data && loading"
-          class="flex min-h-80 flex-col items-center justify-center gap-4 bg-white"
-          role="status"
-        >
-          <RefreshCw :size="24" class="animate-spin text-zinc-400" />
-          <h3 class="font-medium text-zinc-600">Loading workspace</h3>
-        </div>
-        <div
-          v-else-if="!data && error"
-          class="flex min-h-80 flex-col items-center justify-center gap-4 bg-white"
-        >
-          <Database :size="30" class="text-zinc-400" />
-          <h3 class="font-medium">Workspace unavailable</h3>
-          <button class="button" @click="refresh">
-            <RefreshCw :size="14" />Retry connection
-          </button>
-        </div>
-        <div
-          v-else-if="resultCount === 0"
-          class="relative flex min-h-80 flex-col items-center justify-center overflow-hidden border-y border-zinc-200 bg-white px-5 py-12 sm:min-h-96"
-        >
-          <div
-            class="empty-grid pointer-events-none absolute top-3 h-56 w-80"
-            aria-hidden="true"
-          />
-          <div aria-hidden="true" class="relative mb-6 h-24 w-28">
-            <div
-              class="absolute top-1 left-4 h-19 w-15 -rotate-12 rounded-md border border-zinc-200 bg-zinc-50 p-3 shadow-xs"
-            >
-              <div class="mt-2 h-1 rounded bg-zinc-200" />
-              <div class="mt-2 h-1 rounded bg-zinc-200" />
-              <div class="mt-2 h-1 w-2/3 rounded bg-zinc-200" />
-            </div>
-            <div
-              class="absolute top-4 left-10 flex h-19 w-15 rotate-6 flex-col gap-2 rounded-md border border-zinc-300 bg-white p-3 shadow-sm"
-            >
-              <component
-                :is="view === 'listings' ? Layers3 : SearchCheck"
-                :size="22"
-                class="text-zinc-400"
-              />
-              <div class="h-1 rounded bg-zinc-200" />
-              <div class="h-1 w-2/3 rounded bg-zinc-200" />
-            </div>
-            <span
-              class="absolute right-0 bottom-0 grid size-9 place-items-center rounded-full border-4 border-white bg-accent-100 text-accent-600"
-              ><Search :size="16"
-            /></span>
-          </div>
-          <h3 class="relative text-base font-semibold">
-            {{
-              hasFilters
-                ? 'No matching records'
-                : view === 'listings'
-                  ? 'A clean slate for your listings'
-                  : 'No saved searches yet'
-            }}
-          </h3>
-          <p
-            class="relative mt-2 max-w-xs text-center text-sm leading-6 text-zinc-500"
-          >
-            {{
-              hasFilters
-                ? 'No records match the current selection.'
-                : view === 'listings'
-                  ? 'No advertisements have been collected.'
-                  : 'No search subscriptions are configured.'
-            }}
-          </p>
-          <button
-            v-if="hasFilters"
-            class="button relative mt-5"
-            @click="resetFilters"
-          >
-            <X :size="14" />Clear filters
-          </button>
-          <span
-            v-else
-            class="relative mt-6 flex items-center gap-2 text-xs text-zinc-500"
-            ><Database :size="13" />{{
-              data ? 'Local database connected' : 'Waiting for database'
-            }}</span
-          >
-        </div>
+      <EmptyState
+        v-else-if="!data && error"
+        :icon="Database"
+        title="Overview unavailable"
+        description="The data couldn't be loaded. It refreshes on its own, or you can try now."
+      >
+        <button class="btn-secondary" @click="refresh">
+          <RefreshCw :size="14" />Try again
+        </button>
+      </EmptyState>
 
-        <div
-          v-else-if="view === 'listings'"
-          class="relative overflow-x-auto border-y border-zinc-200 bg-white"
-        >
-          <table class="w-full min-w-[780px] border-collapse">
-            <thead class="bg-zinc-100/70">
-              <tr>
-                <th class="table-head w-[42%]">Listing</th>
-                <th class="table-head">Source</th>
-                <th class="table-head text-right">Price</th>
-                <th class="table-head">Status</th>
-                <th class="table-head">First seen</th>
-                <th class="table-head">
-                  <span class="sr-only">Original listing</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-zinc-100">
-              <template v-for="listing in visibleListings" :key="listing.id">
-                <tr
-                  class="cursor-pointer transition-colors"
-                  :class="
-                    expandedListing === listing.id
-                      ? 'bg-accent-50 shadow-[inset_3px_0_0_var(--color-accent-600)]'
-                      : 'hover:bg-zinc-50'
-                  "
-                  @click="toggleListing(listing)"
-                >
-                  <td class="table-cell">
-                    <div class="flex items-center gap-3">
-                      <button
-                        :id="`listing-toggle-${listing.id}`"
-                        class="icon-button -ml-2"
-                        :aria-label="`${expandedListing === listing.id ? 'Collapse' : 'Expand'} listing ${listing.id}`"
-                        :title="
-                          expandedListing === listing.id
-                            ? 'Collapse details'
-                            : 'Expand details'
-                        "
-                        :aria-expanded="expandedListing === listing.id"
-                        :aria-controls="`listing-details-${listing.id}`"
-                        @click.stop="toggleListing(listing)"
-                      >
-                        <ChevronRight
-                          :size="16"
-                          class="transition-transform"
-                          :class="{
-                            'rotate-90 text-accent-600':
-                              expandedListing === listing.id,
-                          }"
-                        />
-                      </button>
-                      <div
-                        class="grid size-12 shrink-0 place-items-center overflow-hidden rounded bg-zinc-100 text-zinc-400"
-                      >
-                        <img
-                          v-if="
-                            safeURL(listing.imageUrl) &&
-                            !failedImages.has(listing.id)
-                          "
-                          :src="safeURL(listing.imageUrl)"
-                          alt=""
-                          class="size-full object-cover"
-                          loading="lazy"
-                          referrerpolicy="no-referrer"
-                          @error="failedImages.add(listing.id)"
-                        /><ImageOff v-else :size="19" />
-                      </div>
-                      <div class="min-w-0">
-                        <button
-                          :id="`listing-title-${listing.id}`"
-                          class="line-clamp-2 text-left text-sm font-medium break-words hover:text-accent-600"
-                          :aria-expanded="expandedListing === listing.id"
-                          :aria-controls="`listing-details-${listing.id}`"
-                          @click.stop="toggleListing(listing)"
-                        >
-                          {{ listing.title }}</button
-                        ><span class="mt-1 block text-xs text-zinc-500"
-                          >{{ listing.location || '-'
-                          }}<span class="mx-1.5 text-zinc-300">/</span
-                          ><span class="font-mono text-[10px]"
-                            >#{{ listing.id }}</span
-                          ></span
-                        >
-                      </div>
-                    </div>
-                  </td>
-                  <td class="table-cell">
-                    <span
-                      class="inline-flex items-center gap-1.5 text-xs text-zinc-600"
-                      ><Globe2 :size="13" class="shrink-0 text-zinc-400" />{{
-                        listing.source
-                      }}</span
-                    >
-                  </td>
-                  <td
-                    class="table-cell text-right text-sm font-medium whitespace-nowrap tabular-nums"
+      <EmptyState
+        v-else-if="resultCount === 0"
+        :icon="
+          hasFilters
+            ? Search
+            : view === 'listings'
+              ? Layers3
+              : SlidersHorizontal
+        "
+        :title="
+          hasFilters
+            ? 'No matching records'
+            : view === 'listings'
+              ? 'No listings yet'
+              : 'No saved searches yet'
+        "
+        :description="
+          hasFilters
+            ? 'Try a different search or clear the filters.'
+            : view === 'listings'
+              ? 'Ads appear here as soon as the scraper collects them.'
+              : 'Searches appear here once someone creates one.'
+        "
+      >
+        <button v-if="hasFilters" class="btn-secondary" @click="resetFilters">
+          Clear filters
+        </button>
+      </EmptyState>
+
+      <div v-else-if="view === 'listings'" class="overflow-x-auto">
+        <table class="w-full min-w-[720px] border-collapse">
+          <thead class="border-b border-gray-150 bg-gray-25">
+            <tr>
+              <th class="table-head w-1/2">Listing</th>
+              <th class="table-head text-right">Price</th>
+              <th class="table-head">Status</th>
+              <th class="table-head">First seen</th>
+              <th class="table-head w-12">
+                <span class="sr-only">Details</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr
+              v-for="listing in visibleListings"
+              :key="listing.id"
+              class="group cursor-pointer transition-colors hover:bg-gray-25"
+              @click="openListing = listing"
+            >
+              <td class="max-w-0 px-4 py-2.5">
+                <div class="flex items-center gap-3">
+                  <div
+                    class="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md bg-gray-100 text-gray-400"
                   >
-                    {{ listing.price || '-' }}
-                  </td>
-                  <td class="table-cell">
-                    <span
-                      class="status-badge"
-                      :class="
-                        listing.active
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-zinc-100 text-zinc-500'
+                    <img
+                      v-if="
+                        safeURL(listing.imageUrl) &&
+                        !failedImages.has(listing.id)
                       "
-                      ><span class="size-1 rounded-full bg-current" />{{
-                        listing.active ? 'Active' : 'Inactive'
-                      }}</span
+                      :src="safeURL(listing.imageUrl)"
+                      alt=""
+                      class="size-full object-cover"
+                      loading="lazy"
+                      referrerpolicy="no-referrer"
+                      @error="failedImages.add(listing.id)"
+                    /><ImageOff v-else :size="15" />
+                  </div>
+                  <div class="min-w-0">
+                    <button
+                      class="block max-w-full truncate text-left text-sm text-gray-900 focus-visible:outline-offset-0"
+                      @click.stop="openListing = listing"
                     >
-                  </td>
-                  <td
-                    class="table-cell max-w-36 text-xs leading-5 text-zinc-500"
-                  >
-                    {{ formatTime(listing.firstSeenAt) }}
-                  </td>
-                  <td class="table-cell">
-                    <a
-                      v-if="safeURL(listing.url)"
-                      class="icon-button"
-                      :href="safeURL(listing.url)"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      :aria-label="`Open ${listing.title}`"
-                      title="Open original listing"
-                      @click.stop
-                      ><ArrowUpRight :size="17"
-                    /></a>
-                  </td>
-                </tr>
-                <tr v-if="expandedListing === listing.id" class="bg-zinc-100">
-                  <td colspan="6" class="border-b-2 border-zinc-300 p-0">
-                    <section
-                      :id="`listing-details-${listing.id}`"
-                      :aria-labelledby="`listing-title-${listing.id}`"
-                      class="w-[min(100%,calc(100vw-2.5rem))] border-l-[3px] border-accent-600 md:w-full"
-                    >
-                      <header
-                        class="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-100 px-4 py-2.5 sm:px-6"
-                      >
-                        <h3
-                          class="flex flex-wrap items-center gap-2 text-xs font-semibold text-zinc-700"
-                        >
-                          <Layers3 :size="14" class="text-accent-600" />Listing
-                          details<span
-                            class="font-mono text-[11px] font-normal text-zinc-500"
-                            >#{{ listing.id }}</span
-                          >
-                        </h3>
-                        <button
-                          class="icon-button"
-                          aria-label="Collapse listing details"
-                          title="Collapse details"
-                          @click="closeListing"
-                        >
-                          <X :size="16" />
-                        </button>
-                      </header>
-                      <div
-                        class="grid md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)]"
-                      >
-                        <div
-                          class="min-w-0 border-b border-zinc-200 bg-zinc-50 p-4 sm:p-6 md:border-r md:border-b-0"
-                        >
-                          <div
-                            class="mb-4 flex aspect-[4/3] w-full max-w-56 items-center justify-center overflow-hidden rounded bg-zinc-200/60"
-                          >
-                            <img
-                              v-if="
-                                safeURL(listing.imageUrl) &&
-                                !failedImages.has(listing.id)
-                              "
-                              :src="safeURL(listing.imageUrl)"
-                              :alt="listing.title"
-                              class="size-full object-contain"
-                              referrerpolicy="no-referrer"
-                              @error="failedImages.add(listing.id)"
-                            /><ImageOff
-                              v-else
-                              :size="26"
-                              class="text-zinc-400"
-                            />
-                          </div>
-                          <p class="text-lg font-semibold tabular-nums">
-                            {{ listing.price || 'Price not recorded' }}
-                          </p>
-                          <span
-                            class="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-500"
-                            ><Globe2 :size="13" />{{ listing.source }}</span
-                          >
-                          <a
-                            v-if="safeURL(listing.url)"
-                            :href="safeURL(listing.url)"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="button mt-5 w-full max-w-56"
-                            ><ArrowUpRight :size="14" />Original listing</a
-                          >
-                        </div>
-                        <div class="min-w-0 bg-white">
-                          <section
-                            class="px-4 py-5 sm:px-6 sm:py-6"
-                            :aria-labelledby="`listing-specs-${listing.id}`"
-                          >
-                            <h4
-                              :id="`listing-specs-${listing.id}`"
-                              class="mb-5 text-sm font-semibold"
-                            >
-                              Specifications
-                            </h4>
-                            <dl
-                              v-if="listingAttributes.length"
-                              class="grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-3"
-                            >
-                              <div
-                                v-for="attribute in listingAttributes"
-                                :key="attribute.key"
-                                class="min-w-0"
-                              >
-                                <dt class="mb-1.5 text-xs text-zinc-500">
-                                  {{ attribute.label }}
-                                </dt>
-                                <dd
-                                  class="text-base font-medium whitespace-pre-wrap [overflow-wrap:anywhere]"
-                                >
-                                  {{ attribute.value }}
-                                </dd>
-                              </div>
-                            </dl>
-                            <p v-else class="text-sm text-zinc-500">
-                              No additional attributes recorded.
-                            </p>
-                          </section>
-                          <section
-                            class="border-t border-zinc-200 px-4 py-5 sm:px-6"
-                            :aria-labelledby="`listing-text-${listing.id}`"
-                          >
-                            <div class="mb-3 flex flex-wrap items-center gap-2">
-                              <h4
-                                :id="`listing-text-${listing.id}`"
-                                class="text-sm font-semibold"
-                              >
-                                {{
-                                  description ? 'Description' : 'Listing text'
-                                }}
-                              </h4>
-                              <span
-                                v-if="!description"
-                                class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500"
-                                >Category-page preview</span
-                              >
-                            </div>
-                            <p
-                              class="max-w-prose text-sm leading-7 break-words whitespace-pre-wrap text-zinc-600"
-                            >
-                              {{ description ?? listing.title }}
-                            </p>
-                            <p
-                              v-if="!description"
-                              class="mt-3 text-xs leading-5 text-zinc-500"
-                            >
-                              Full description not collected.
-                            </p>
-                          </section>
-                        </div>
-                      </div>
-                      <footer
-                        class="border-t border-zinc-200 bg-zinc-100 px-4 py-4 sm:px-6"
-                      >
-                        <dl
-                          class="grid gap-4 text-xs sm:grid-cols-[180px_minmax(0,1fr)]"
-                        >
-                          <div>
-                            <dt class="mb-1 text-zinc-500">First seen</dt>
-                            <dd class="font-medium text-zinc-700">
-                              {{ formatTime(listing.firstSeenAt) }}
-                            </dd>
-                          </div>
-                          <div class="min-w-0">
-                            <dt class="mb-1 text-zinc-500">Category path</dt>
-                            <dd
-                              class="font-mono text-[11px] leading-5 text-zinc-600 [overflow-wrap:anywhere]"
-                            >
-                              {{ listing.location || '-' }}
-                            </dd>
-                          </div>
-                        </dl>
-                        <details class="mt-4 border-t border-zinc-200 pt-3">
-                          <summary
-                            class="cursor-pointer text-xs font-medium text-zinc-600"
-                          >
-                            Raw scraped attributes
-                          </summary>
-                          <pre
-                            class="mt-3 max-h-64 overflow-auto font-mono text-xs leading-6 whitespace-pre-wrap text-zinc-600 [overflow-wrap:anywhere]"
-                            >{{
-                              JSON.stringify(listing.attrs ?? {}, null, 2)
-                            }}</pre>
-                        </details>
-                      </footer>
-                    </section>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
+                      {{ listing.title }}
+                    </button>
+                    <p class="mt-0.5 truncate text-xs text-gray-500">
+                      {{ listing.source }} ·
+                      {{ listing.location || 'No category' }}
+                    </p>
+                  </div>
+                </div>
+              </td>
+              <td
+                class="px-4 py-2.5 text-right text-sm font-medium whitespace-nowrap text-gray-900 tabular-nums"
+              >
+                {{ listing.price || '—' }}
+              </td>
+              <td class="px-4 py-2.5">
+                <span
+                  :class="listing.active ? 'badge-success' : 'badge-neutral'"
+                  >{{ listing.active ? 'Active' : 'Inactive' }}</span
+                >
+              </td>
+              <td
+                class="px-4 py-2.5 text-small whitespace-nowrap text-gray-600 tabular-nums"
+              >
+                {{ formatTime(listing.firstSeenAt) }}
+              </td>
+              <td class="px-4 py-2.5 text-gray-400">
+                <ChevronRight
+                  :size="16"
+                  class="transition-colors group-hover:text-gray-700"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        <div
-          v-else
-          class="divide-y divide-zinc-100 border-y border-zinc-200 bg-white"
-        >
-          <article v-for="saved in visibleSearches" :key="saved.id">
-            <button
-              class="flex w-full items-center gap-3 px-3 py-5 text-left hover:bg-zinc-50 sm:gap-4 sm:px-4"
-              :aria-expanded="expanded === saved.id"
-              @click="expanded = expanded === saved.id ? null : saved.id"
+      <div v-else class="overflow-x-auto">
+        <table class="w-full min-w-[720px] border-collapse">
+          <thead class="border-b border-gray-150 bg-gray-25">
+            <tr>
+              <th class="table-head w-1/2">Search</th>
+              <th class="table-head">Sends to</th>
+              <th class="table-head text-right">Matches</th>
+              <th class="table-head">Status</th>
+              <th class="table-head w-12">
+                <span class="sr-only">Details</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr
+              v-for="saved in visibleSearches"
+              :key="saved.id"
+              class="group cursor-pointer transition-colors hover:bg-gray-25"
+              @click="openSearch = saved"
             >
-              <span
-                class="grid size-9 shrink-0 place-items-center rounded bg-zinc-100 text-zinc-500"
-                ><Search :size="17" /></span
-              ><span class="min-w-0 flex-1"
-                ><strong class="block text-sm font-medium break-words">{{
-                  saved.name
-                }}</strong
-                ><span class="mt-1 block text-xs text-zinc-500"
-                  >{{ saved.userName }} · {{ saved.source }}</span
-                ></span
-              ><span class="hidden text-xs text-zinc-500 sm:block"
-                >{{ saved.matches }} matches</span
-              ><span
-                class="status-badge"
-                :class="
-                  saved.enabled
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-zinc-100 text-zinc-500'
-                "
-                ><Check v-if="saved.enabled" :size="12" />{{
-                  saved.enabled ? 'Enabled' : 'Disabled'
-                }}</span
-              ><ChevronRight
-                :size="15"
-                class="shrink-0 text-zinc-400 transition-transform"
-                :class="{ 'rotate-90': expanded === saved.id }"
-              />
-            </button>
-            <div
-              v-if="expanded === saved.id"
-              class="border-t border-zinc-100 bg-zinc-50/70 px-5 py-5 sm:pl-17"
-            >
-              <dl class="grid gap-5 text-sm sm:grid-cols-2">
-                <div>
-                  <dt class="mb-1.5 text-xs font-medium text-zinc-500">
-                    Channel
-                  </dt>
-                  <dd class="break-all">{{ saved.channel || '-' }}</dd>
-                </div>
-                <div>
-                  <dt class="mb-1.5 text-xs font-medium text-zinc-500">
-                    Filters
-                  </dt>
-                  <dd>
-                    <pre
-                      class="font-mono text-xs leading-6 break-words whitespace-pre-wrap"
-                      >{{ JSON.stringify(saved.filters, null, 2) }}</pre>
-                  </dd>
-                </div>
-                <div class="sm:col-span-2">
-                  <dt class="mb-1.5 text-xs font-medium text-zinc-500">
-                    Feeds
-                  </dt>
-                  <dd
-                    v-for="feed in saved.feeds"
-                    :key="feed"
-                    class="break-all text-xs leading-6 text-zinc-600"
-                  >
-                    {{ feed }}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          </article>
-        </div>
+              <td class="max-w-0 px-4 py-3">
+                <button
+                  class="block max-w-full truncate text-left text-sm text-gray-900 focus-visible:outline-offset-0"
+                  @click.stop="openSearch = saved"
+                >
+                  {{ saved.name }}
+                </button>
+                <p class="mt-0.5 truncate text-xs text-gray-500">
+                  {{ saved.userName }} · {{ saved.source }}
+                </p>
+              </td>
+              <td class="max-w-48 truncate px-4 py-3 text-small text-gray-600">
+                {{ saved.channel || '—' }}
+              </td>
+              <td
+                class="px-4 py-3 text-right text-sm text-gray-900 tabular-nums"
+              >
+                {{ saved.matches.toLocaleString() }}
+              </td>
+              <td class="px-4 py-3">
+                <span
+                  :class="saved.enabled ? 'badge-success' : 'badge-warning'"
+                  >{{ saved.enabled ? 'Enabled' : 'Paused' }}</span
+                >
+              </td>
+              <td class="px-4 py-3 text-gray-400">
+                <ChevronRight
+                  :size="16"
+                  class="transition-colors group-hover:text-gray-700"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        <footer
-          class="flex items-center justify-between gap-4 py-4 text-xs text-zinc-500"
-        >
-          <span>{{
-            resultCount
-              ? `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, resultCount)} of ${resultCount} records`
-              : '0 records'
-          }}</span>
-          <div v-if="resultCount > pageSize" class="flex items-center gap-3">
-            <button
-              class="icon-button"
-              title="Previous page"
-              aria-label="Previous page"
-              :disabled="page === 1"
-              @click="page--"
-            >
-              <ArrowLeft :size="15" /></button
-            ><span class="font-mono text-[11px]"
-              >{{ page }} / {{ pageCount }}</span
-            ><button
-              class="icon-button"
-              title="Next page"
-              aria-label="Next page"
-              :disabled="page === pageCount"
-              @click="page++"
-            >
-              <ArrowRight :size="15" />
-            </button>
-          </div>
-          <span v-else class="flex items-center gap-1.5"
-            ><RefreshCw :size="12" :class="{ 'animate-spin': loading }" />{{
-              error
-                ? 'Sync interrupted'
-                : loading
-                  ? 'Syncing'
-                  : 'Auto-sync · 30s'
-            }}</span
-          >
-        </footer>
-      </section>
       <footer
-        class="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 pt-5 text-xs text-zinc-500"
+        v-if="resultCount > 0"
+        class="flex items-center justify-between gap-4 border-t border-gray-150 px-4 py-2 text-small text-gray-500"
       >
-        <span class="flex items-center gap-2"
-          ><Radio :size="14" /><span class="font-medium text-zinc-600"
-            >admonitor</span
-          ><span class="text-zinc-300">/</span>Local workspace</span
-        ><span class="flex items-center gap-1.5"
-          ><ShieldCheck :size="13" />Read-only session</span
+        <span class="tabular-nums"
+          >{{ (page - 1) * pageSize + 1 }}–{{
+            Math.min(page * pageSize, resultCount)
+          }}
+          of {{ resultCount.toLocaleString() }}</span
         >
+        <div v-if="pageCount > 1" class="flex items-center gap-1">
+          <span class="mr-2 tabular-nums"
+            >Page {{ page }} of {{ pageCount }}</span
+          >
+          <button
+            class="btn-icon"
+            aria-label="Previous page"
+            title="Previous page"
+            :disabled="page === 1"
+            @click="page--"
+          >
+            <ChevronLeft :size="16" />
+          </button>
+          <button
+            class="btn-icon"
+            aria-label="Next page"
+            title="Next page"
+            :disabled="page === pageCount"
+            @click="page++"
+          >
+            <ChevronRight :size="16" />
+          </button>
+        </div>
       </footer>
-    </main>
-  </div>
+    </div>
+    <p class="mt-3 text-xs text-gray-500">
+      Shows the latest 100 records of each kind and refreshes every 30 seconds.
+    </p>
+
+    <BaseDialog
+      v-if="openListing"
+      title="Listing"
+      :subtitle="`#${openListing.id} · ${openListing.source}`"
+      light-dismiss
+      @close="openListing = null"
+    >
+      <div
+        class="grid aspect-[16/10] place-items-center overflow-hidden rounded-lg bg-gray-100 text-gray-400"
+      >
+        <img
+          v-if="
+            safeURL(openListing.imageUrl) && !failedImages.has(openListing.id)
+          "
+          :src="safeURL(openListing.imageUrl)"
+          :alt="openListing.title"
+          class="size-full object-contain"
+          referrerpolicy="no-referrer"
+          @error="failedImages.add(openListing.id)"
+        /><ImageOff v-else :size="24" />
+      </div>
+
+      <div class="mt-5 flex items-start justify-between gap-4">
+        <p
+          class="font-display text-display font-semibold tracking-[-0.015em] tabular-nums"
+        >
+          {{ openListing.price || 'No price' }}
+        </p>
+        <span
+          class="mt-2"
+          :class="openListing.active ? 'badge-success' : 'badge-neutral'"
+          >{{ openListing.active ? 'Active' : 'Inactive' }}</span
+        >
+      </div>
+      <p class="mt-1 text-sm text-gray-700">{{ openListing.title }}</p>
+      <a
+        v-if="safeURL(openListing.url)"
+        :href="safeURL(openListing.url)"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn-primary mt-5 w-full"
+        >Open on {{ openListing.source }}<ArrowUpRight :size="16"
+      /></a>
+
+      <section class="mt-8">
+        <h3 class="mb-3 text-sm font-semibold text-gray-900">Specifications</h3>
+        <dl
+          v-if="listingAttributes.length"
+          class="grid grid-cols-2 gap-x-6 gap-y-4"
+        >
+          <div v-for="attribute in listingAttributes" :key="attribute.key">
+            <dt class="text-xs text-gray-500">{{ attribute.label }}</dt>
+            <dd
+              class="mt-0.5 text-sm text-gray-900 tabular-nums [overflow-wrap:anywhere]"
+            >
+              {{ attribute.value }}
+            </dd>
+          </div>
+        </dl>
+        <p v-else class="text-sm text-gray-500">No specifications recorded.</p>
+      </section>
+
+      <section class="mt-8">
+        <h3 class="mb-2 text-sm font-semibold text-gray-900">Description</h3>
+        <p
+          v-if="description"
+          class="text-sm leading-6 whitespace-pre-wrap text-gray-700 [overflow-wrap:anywhere]"
+        >
+          {{ description }}
+        </p>
+        <p v-else class="text-sm text-gray-500">
+          Only the summary from the category page was collected.
+        </p>
+      </section>
+
+      <section class="mt-8 border-t border-gray-150 pt-6">
+        <dl class="grid gap-3 text-sm">
+          <div class="flex gap-4">
+            <dt class="w-32 shrink-0 text-gray-500">First seen</dt>
+            <dd class="text-gray-900 tabular-nums">
+              {{ formatTime(openListing.firstSeenAt) }}
+            </dd>
+          </div>
+          <div class="flex gap-4">
+            <dt class="w-32 shrink-0 text-gray-500">Category path</dt>
+            <dd
+              class="min-w-0 font-mono text-xs leading-5 text-gray-700 [overflow-wrap:anywhere]"
+            >
+              {{ openListing.location || '—' }}
+            </dd>
+          </div>
+        </dl>
+        <details class="group mt-5">
+          <summary
+            class="flex list-none items-center gap-1 text-small font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden"
+          >
+            <ChevronRight
+              :size="14"
+              class="transition-transform group-open:rotate-90"
+            />Raw attributes
+          </summary>
+          <pre
+            class="mt-3 max-h-72 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-gray-700 [overflow-wrap:anywhere]"
+            >{{ JSON.stringify(openListing.attrs ?? {}, null, 2) }}</pre>
+        </details>
+      </section>
+    </BaseDialog>
+
+    <BaseDialog
+      v-if="openSearch"
+      :title="openSearch.name"
+      :subtitle="`Created by ${openSearch.userName}`"
+      light-dismiss
+      @close="openSearch = null"
+    >
+      <dl class="grid gap-3 text-sm">
+        <div class="flex gap-4">
+          <dt class="w-32 shrink-0 text-gray-500">Status</dt>
+          <dd>
+            <span
+              :class="openSearch.enabled ? 'badge-success' : 'badge-warning'"
+              >{{ openSearch.enabled ? 'Enabled' : 'Paused' }}</span
+            >
+          </dd>
+        </div>
+        <div class="flex gap-4">
+          <dt class="w-32 shrink-0 text-gray-500">Matches</dt>
+          <dd class="text-gray-900 tabular-nums">
+            {{ openSearch.matches.toLocaleString() }}
+          </dd>
+        </div>
+        <div class="flex gap-4">
+          <dt class="w-32 shrink-0 text-gray-500">Source</dt>
+          <dd class="text-gray-900">{{ openSearch.source }}</dd>
+        </div>
+        <div class="flex gap-4">
+          <dt class="w-32 shrink-0 text-gray-500">Sends to</dt>
+          <dd class="min-w-0 text-gray-900 [overflow-wrap:anywhere]">
+            {{ openSearch.channel || '—' }}
+          </dd>
+        </div>
+      </dl>
+
+      <section class="mt-8">
+        <h3 class="mb-3 text-sm font-semibold text-gray-900">Filters</h3>
+        <dl
+          v-if="filterRows(openSearch.filters).length"
+          class="divide-y divide-gray-100 rounded-md shadow-card"
+        >
+          <div
+            v-for="row in filterRows(openSearch.filters)"
+            :key="row.key"
+            class="flex gap-4 px-3 py-2.5 text-sm"
+          >
+            <dt class="w-32 shrink-0 text-gray-500">{{ row.label }}</dt>
+            <dd class="min-w-0 text-gray-900 [overflow-wrap:anywhere]">
+              {{ row.value }}
+            </dd>
+          </div>
+        </dl>
+        <p v-else class="text-sm text-gray-500">
+          No filters, so it matches every new ad.
+        </p>
+      </section>
+
+      <section class="mt-8">
+        <h3 class="mb-1 text-sm font-semibold text-gray-900">Feeds</h3>
+        <p class="mb-3 text-small text-gray-500">
+          The ss.com pages polled for this search.
+        </p>
+        <ul v-if="openSearch.feeds.length" class="grid gap-1.5">
+          <li
+            v-for="feed in openSearch.feeds"
+            :key="feed"
+            class="rounded-md bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 [overflow-wrap:anywhere]"
+          >
+            {{ feed }}
+          </li>
+        </ul>
+        <p v-else class="text-sm text-gray-500">No feeds.</p>
+      </section>
+    </BaseDialog>
+  </section>
 </template>

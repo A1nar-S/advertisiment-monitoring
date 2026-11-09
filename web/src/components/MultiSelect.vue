@@ -13,6 +13,7 @@ const props = defineProps<{
 }>()
 const model = defineModel<string[]>({ default: () => [] })
 
+const input = ref<HTMLInputElement>()
 const query = ref('')
 const open = ref(false)
 const active = ref(0)
@@ -36,6 +37,12 @@ const matches = computed(() => {
   }
   return [...starts, ...inside].slice(0, 50)
 })
+
+const listShown = computed(
+  () =>
+    open.value &&
+    (matches.value.length > 0 || (!!props.allowFree && !!query.value.trim())),
+)
 
 function add(value: string) {
   const v = value.trim()
@@ -63,6 +70,14 @@ function onBackspace() {
   if (!query.value && model.value.length) model.value = model.value.slice(0, -1)
 }
 
+// Esc closes the list first; a second Esc reaches the surrounding dialog.
+function onEscape(event: KeyboardEvent) {
+  if (!listShown.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  open.value = false
+}
+
 function move(step: number) {
   open.value = true
   const n = matches.value.length
@@ -73,16 +88,17 @@ function move(step: number) {
 <template>
   <div class="relative">
     <div
-      class="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1.5 focus-within:border-accent-600"
+      class="field-within flex min-h-8 flex-wrap items-center gap-1 px-1 py-[3px]"
+      @mousedown.self.prevent="input?.focus()"
     >
       <span
         v-for="value in model"
         :key="value"
-        class="inline-flex items-center gap-1 rounded bg-zinc-100 py-0.5 pr-1 pl-2 text-xs text-zinc-800"
+        class="inline-flex h-6 items-center gap-0.5 rounded bg-gray-100 pr-0.5 pl-2 text-small text-gray-900"
         >{{ value
         }}<button
           type="button"
-          class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900"
+          class="grid size-5 place-items-center rounded-sm text-gray-500 hover:bg-gray-200 hover:text-gray-900"
           :aria-label="`Remove ${value}`"
           @click="remove(value)"
         >
@@ -90,8 +106,9 @@ function move(step: number) {
       ></span>
       <input
         :id="id"
+        ref="input"
         v-model="query"
-        class="min-w-24 flex-1 bg-transparent py-0.5 text-sm outline-none focus-visible:outline-none"
+        class="h-6 min-w-24 flex-1 bg-transparent px-1.5 text-sm outline-none placeholder:text-gray-400 focus-visible:outline-none"
         :placeholder="model.length ? '' : placeholder"
         role="combobox"
         :aria-expanded="open && matches.length > 0"
@@ -103,23 +120,21 @@ function move(step: number) {
         @keydown.backspace="onBackspace"
         @keydown.down.prevent="move(1)"
         @keydown.up.prevent="move(-1)"
-        @keydown.esc="open = false"
+        @keydown.esc="onEscape"
       />
     </div>
     <ul
-      v-if="open && (matches.length || (allowFree && query.trim()))"
+      v-if="listShown"
       role="listbox"
-      class="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
+      class="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg bg-white p-1 shadow-raised"
     >
       <li
         v-for="(option, index) in matches"
         :key="option"
         role="option"
         :aria-selected="index === active"
-        class="cursor-pointer px-3 py-1.5 text-sm"
-        :class="
-          index === active ? 'bg-accent-50 text-zinc-900' : 'text-zinc-700'
-        "
+        class="cursor-pointer rounded-md px-2.5 py-1.5 text-sm text-gray-900"
+        :class="{ 'bg-gray-100': index === active }"
         @mousedown.prevent="add(option)"
         @mouseenter="active = index"
       >
@@ -127,10 +142,12 @@ function move(step: number) {
       </li>
       <li
         v-if="allowFree && query.trim() && !matches.includes(query.trim())"
-        class="cursor-pointer border-t border-zinc-100 px-3 py-1.5 text-sm text-zinc-500"
+        class="cursor-pointer rounded-md px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+        :class="{ 'mt-1 border-t border-gray-100': matches.length }"
         @mousedown.prevent="add(query)"
       >
-        Use “{{ query.trim() }}”
+        Use “<span class="text-gray-900">{{ query.trim() }}</span
+        >”
       </li>
     </ul>
   </div>

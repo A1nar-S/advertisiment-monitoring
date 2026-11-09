@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,12 +81,30 @@ type spec struct {
 func (s *Service) WithLimits(maxSearches int, admins []string) *Service {
 	s.maxSearches = maxSearches
 	s.admins = map[string]bool{}
-	for _, a := range admins {
-		if a = strings.TrimSpace(a); a != "" {
-			s.admins[a] = true
+	for i, a := range admins {
+		key, ok := adminKey(a)
+		if !ok {
+			// Don't log the entry itself: it comes straight from .env.
+			slog.Warn("ADMIN_USERS entry ignored: write it as platform:id, e.g. discord:123456789012345678",
+				"position", i+1)
+			continue
 		}
+		s.admins[key] = true
 	}
 	return s
+}
+
+// adminKey normalizes one ADMIN_USERS entry to "platform:id". It forgives
+// stray quotes, spaces and a capitalized platform ("Discord:123"), but a
+// bare ID is rejected: it can't say which chat platform it belongs to.
+func adminKey(entry string) (string, bool) {
+	entry = strings.Trim(strings.TrimSpace(entry), `"'`)
+	platform, id, ok := strings.Cut(entry, ":")
+	platform, id = strings.ToLower(strings.TrimSpace(platform)), strings.TrimSpace(id)
+	if !ok || platform == "" || id == "" {
+		return "", false
+	}
+	return platform + ":" + id, true
 }
 
 // PlatformOwner returns the user for a chat account, creating it on first
