@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/A1nar-S/advertisiment-monitoring/internal/events"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions/subscriptionsdb"
 )
@@ -329,25 +331,9 @@ func (s *Service) compile(ctx context.Context, o Owner, in SearchInput) (compile
 		}
 		return compiled{}, err
 	}
-	source := in.Source
-	if source == "" {
-		source = DefaultSource
-	}
-	src, err := s.sources.Get(source)
-	if err != nil {
-		return compiled{}, &sources.InvalidSearch{Msg: err.Error()}
-	}
-	cat, ok := src.(sources.Catalog)
-	if !ok {
-		return compiled{}, &sources.InvalidSearch{Msg: source + " has no searchable categories"}
-	}
-	c, err := cat.CompileSearch(in.Category, in.Filters)
+	source, _, c, filters, err := s.compileFilters(in)
 	if err != nil {
 		return compiled{}, err
-	}
-	filters, err := parseFilters(c.Filters)
-	if err != nil {
-		return compiled{}, &sources.InvalidSearch{Msg: err.Error()}
 	}
 	fj, err := json.Marshal(filters)
 	if err != nil {
@@ -358,6 +344,97 @@ func (s *Service) compile(ctx context.Context, o Owner, in SearchInput) (compile
 		return compiled{}, err
 	}
 	return compiled{source: source, feeds: c.Feeds, filters: fj, spec: sj}, nil
+}
+
+// compileFilters turns a search's category and filters into what the
+// pipeline runs on, through its source's catalog.
+func (s *Service) compileFilters(in SearchInput) (string, sources.Source, sources.Compiled, Filters, error) {
+	source := in.Source
+	if source == "" {
+		source = DefaultSource
+	}
+	src, err := s.sources.Get(source)
+	if err != nil {
+		return "", nil, sources.Compiled{}, Filters{}, &sources.InvalidSearch{Msg: err.Error()}
+	}
+	cat, ok := src.(sources.Catalog)
+	if !ok {
+		return "", nil, sources.Compiled{}, Filters{}, &sources.InvalidSearch{Msg: source + " has no searchable categories"}
+	}
+	c, err := cat.CompileSearch(in.Category, in.Filters)
+	if err != nil {
+		return "", nil, sources.Compiled{}, Filters{}, err
+	}
+	filters, err := parseFilters(c.Filters)
+	if err != nil {
+		return "", nil, sources.Compiled{}, Filters{}, &sources.InvalidSearch{Msg: err.Error()}
+	}
+	return source, src, c, filters, nil
+}
+
+// Preview is how a search, as written, fares against stored listings.
+type Preview struct {
+	InScope int   // candidates in the search's category and area at all
+	Matched []int // indexes into the candidates that match for certain
+	// Unsure match every filter the list page shows but filter on something
+	// only the ad page has (UnsureKeys), and that page was never read.
+	Unsure     []int
+	UnsureKeys []string
+}
+
+// Preview checks a search, without saving it, against candidates (stored
+// listings, ad-page details merged in), exactly as the matcher would check
+// a new listing. Name and channel are not needed.
+func (s *Service) Preview(in SearchInput, candidates []events.ListingDiscovered) (Preview, error) {
+	_, src, c, filters, err := s.compileFilters(in)
+	if err != nil {
+		return Preview{}, err
+	}
+	search := Search{Feeds: c.Feeds, Filters: filters}
+	enrichable := map[string]bool{}
+	if e, ok := src.(sources.Enricher); ok {
+		for _, k := range e.EnrichableKeys() {
+			enrichable[k] = true
+		}
+	}
+	var p Preview
+	unsure := map[string]bool{}
+	for i, l := range candidates {
+		if !src.InScope(search.Feeds, l) {
+			continue
+		}
+		p.InScope++
+		switch search.Evaluate(src, l, enrichable) {
+		case Matched:
+			p.Matched = append(p.Matched, i)
+		case NeedsDetail:
+			p.Unsure = append(p.Unsure, i)
+			for _, k := range filters.keys() {
+				if _, has := l.Attrs[k]; enrichable[k] && !has {
+					unsure[k] = true
+				}
+			}
+		}
+	}
+	for k := range unsure {
+		p.UnsureKeys = append(p.UnsureKeys, k)
+	}
+	slices.Sort(p.UnsureKeys)
+	return p, nil
+}
+
+// keys lists every attr the filters look at.
+func (f Filters) keys() []string {
+	var out []string
+	for k := range f.Ranges {
+		out = append(out, k)
+	}
+	for _, m := range []map[string][]string{f.OneOf, f.AllOf, f.Contains} {
+		for k := range m {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func viewOf(r subscriptionsdb.ListSearchViewsRow) (SearchView, error) {

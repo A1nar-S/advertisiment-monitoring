@@ -229,6 +229,8 @@ type API struct {
 	Addr           string // listen address
 	WebDir         string // built dashboard (web/dist); empty = API only
 	FeedCollapseAt int
+	// RequestGap spaces out the ad pages an admin asks the dashboard to read.
+	RequestGap time.Duration
 }
 
 func APIFromEnv() (API, error) {
@@ -236,6 +238,7 @@ func APIFromEnv() (API, error) {
 		Common: commonFromEnv(), SelfService: selfServiceFromEnv(),
 		Addr: env("API_ADDR", "127.0.0.1:8080"), WebDir: env("WEB_DIR", "web/dist"),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
+		RequestGap:     time.Duration(envInt("REQUEST_GAP_SECONDS", 2)) * time.Second,
 	}, nil
 }
 

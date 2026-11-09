@@ -83,9 +83,11 @@ async function call<T>(
   method: string,
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(path, {
     method,
+    signal,
     credentials: 'same-origin',
     headers: {
       'X-Requested-With': 'fetch',
@@ -138,3 +140,46 @@ export function describe(filters: Filters, fields?: FieldSpec[]): string {
     .filter(Boolean)
   return parts.length ? parts.join(' · ') : 'Everything'
 }
+
+// --- search preview ---------------------------------------------------------
+
+export type PreviewAd = {
+  id: number
+  title: string
+  url: string
+  price: string
+  imageUrl: string
+  location: string
+  firstSeen: string
+  active: boolean
+  // false: passes the list-page filters, but its ad page was never read to
+  // check the rest (Preview.unsureKeys).
+  sure: boolean
+}
+
+export type Preview = {
+  scanned: number
+  inScope: number
+  matched: number
+  unsure: number
+  unsureKeys: string[]
+  since?: string
+  ads: PreviewAd[]
+}
+
+export const previewSearch = (
+  input: { category: string; filters: Filters },
+  signal?: AbortSignal,
+) => call<Preview>('POST', '/api/searches/preview', input, signal)
+
+// --- listing details (admin) ------------------------------------------------
+
+export type ListingDetails = {
+  attrs: Record<string, unknown>
+  active: boolean
+  detailedAt: string
+}
+
+// Reads the ad's own page on its site now and saves what it adds.
+export const readListingDetails = (id: number) =>
+  call<ListingDetails>('POST', `/api/listings/${id}/details`)

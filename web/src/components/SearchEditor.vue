@@ -19,6 +19,7 @@ import BaseDialog from './BaseDialog.vue'
 import EmptyState from './EmptyState.vue'
 import MultiSelect from './MultiSelect.vue'
 import PageHeader from './PageHeader.vue'
+import SearchPreview from './SearchPreview.vue'
 import SearchSwitcher from './SearchSwitcher.vue'
 import {
   api,
@@ -29,6 +30,7 @@ import {
   type FieldSpec,
   type Filters,
   type Me,
+  type Preview,
   type Range,
   type Search,
 } from '../api'
@@ -128,6 +130,8 @@ const dirty = computed(
   () => state.value === 'ready' && JSON.stringify(input()) !== snapshot.value,
 )
 const summary = computed(() => describe(collect(), fields.value))
+const currentFilters = computed(() => collect())
+const preview = ref<Preview | null>(null)
 
 async function load() {
   state.value = 'loading'
@@ -495,6 +499,27 @@ const created = computed(() =>
         </div>
       </section>
 
+      <section
+        id="preview"
+        class="grid scroll-mt-6 gap-x-12 gap-y-4 border-t border-gray-200 py-8 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]"
+        aria-labelledby="preview-heading"
+      >
+        <div>
+          <h2 id="preview-heading" class="text-base font-semibold">Preview</h2>
+          <p class="mt-1 text-small text-gray-500">
+            Ads already collected that these filters would have matched, so you
+            can check them before saving. Updates as you edit; nothing is sent.
+          </p>
+        </div>
+        <SearchPreview
+          :category="category"
+          :category-label="categoryLabel(category)"
+          :filters="currentFilters"
+          :fields="fields"
+          @result="preview = $event"
+        />
+      </section>
+
       <div
         class="sticky bottom-0 z-10 -mx-4 -mb-8 border-t border-gray-200 bg-white/90 backdrop-blur-md sm:-mx-8 lg:-mx-10 lg:-mb-10"
       >
@@ -512,8 +537,23 @@ const created = computed(() =>
             class="hidden min-w-0 flex-1 truncate text-small text-gray-600 md:block"
             :title="summary"
           >
-            <span class="text-gray-500">Matches</span>
-            {{ summary === 'Everything' ? 'every new ad' : summary }}
+            <a
+              v-if="preview && preview.inScope"
+              href="#preview"
+              class="mr-1 font-medium text-brand-700 tabular-nums hover:underline"
+              >{{ preview.matched.toLocaleString() }} collected
+              {{ preview.matched === 1 ? 'ad matches' : 'ads match' }}</a
+            ><span v-if="preview && preview.inScope" class="mr-1 text-gray-400"
+              >·</span
+            >
+            <span v-if="!preview?.inScope" class="text-gray-500">Matches</span>
+            {{
+              summary === 'Everything'
+                ? preview?.inScope
+                  ? 'Every ad'
+                  : 'every new ad'
+                : summary
+            }}
           </p>
           <span
             v-if="dirty"

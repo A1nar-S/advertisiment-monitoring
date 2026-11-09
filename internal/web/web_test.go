@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/A1nar-S/advertisiment-monitoring/internal/events"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/listings"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions"
@@ -44,6 +45,9 @@ func (*fakeSearches) SessionOwner(_ context.Context, session string) (subscripti
 	return subscriptions.Owner{}, subscriptions.ErrBadToken
 }
 func (*fakeSearches) Logout(context.Context, string) error { return nil }
+func (*fakeSearches) Preview(subscriptions.SearchInput, []events.ListingDiscovered) (subscriptions.Preview, error) {
+	return subscriptions.Preview{}, nil
+}
 func (*fakeSearches) ListSearches(_ context.Context, o subscriptions.Owner, all bool) ([]subscriptions.SearchView, error) {
 	if o.UserID != alice.UserID && (!all || !o.Admin) {
 		return nil, nil
@@ -87,6 +91,17 @@ func (*fakeSearches) Categories() map[string][]sources.Category {
 }
 
 type fakeListings struct{}
+
+func (fakeListings) Recent(context.Context, string, int32) ([]listings.Stored, error) {
+	return nil, nil
+}
+func (fakeListings) Get(context.Context, int64) (listings.Stored, error) {
+	return listings.Stored{}, listings.ErrNotFound
+}
+func (fakeListings) SaveDetails(context.Context, events.ListingDiscovered, events.ListingDiscovered) error {
+	return nil
+}
+func (fakeListings) MarkGone(context.Context, string, string) error { return nil }
 
 func (fakeListings) Summaries(_ context.Context, _ string, ids []string) (map[string]listings.Summary, error) {
 	out := map[string]listings.Summary{}

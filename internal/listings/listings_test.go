@@ -144,3 +144,51 @@ func TestPurgeKeepsRecentlySeen(t *testing.T) {
 		t.Errorf("left = %q, want kept", left)
 	}
 }
+
+func TestDetailsSurviveScrapes(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	l := listing("1", "riga/centre/hand_over")
+	if _, err := svc.Ingest(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	enriched := l
+	enriched.Attrs = map[string]any{"rooms": 2.0, "house_type": "Ķieģeļu"}
+	if err := svc.SaveDetails(ctx, l, enriched); err != nil {
+		t.Fatal(err)
+	}
+	// The next scrape rewrites attrs from the list page and must not lose
+	// what the ad page added, nor the feed the ad was first found on.
+	l.Attrs = map[string]any{"rooms": 3.0}
+	l.Feed = "riga/all/hand_over"
+	if _, err := svc.Ingest(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+
+	recent, err := svc.Recent(ctx, "ss.com", 10)
+	if err != nil || len(recent) != 1 {
+		t.Fatalf("recent = %v, %v", recent, err)
+	}
+	got := recent[0]
+	if got.Listing.Attrs["house_type"] != "Ķieģeļu" || got.Listing.Attrs["rooms"] != 3.0 {
+		t.Errorf("attrs = %v, want the ad page's house_type and the feed's new rooms", got.Listing.Attrs)
+	}
+	if got.Listing.Feed != "riga/centre/hand_over" {
+		t.Errorf("feed = %q, want the first one", got.Listing.Feed)
+	}
+
+	one, err := svc.Get(ctx, got.ID)
+	if err != nil || one.DetailedAt == nil || one.Listing.ExternalID != "1" {
+		t.Fatalf("get = %+v, %v", one, err)
+	}
+	if err := svc.MarkGone(ctx, "ss.com", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if one, _ = svc.Get(ctx, got.ID); one.Active {
+		t.Error("still active after MarkGone")
+	}
+	if _, err := svc.Get(ctx, got.ID+100); err != ErrNotFound {
+		t.Errorf("missing listing: err = %v, want ErrNotFound", err)
+	}
+}

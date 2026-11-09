@@ -7,6 +7,7 @@ import {
   CircleAlert,
   Database,
   ImageOff,
+  TriangleAlert,
   Layers3,
   RefreshCw,
   Search,
@@ -16,6 +17,7 @@ import {
 import BaseDialog from './BaseDialog.vue'
 import EmptyState from './EmptyState.vue'
 import PageHeader from './PageHeader.vue'
+import { ApiError, readListingDetails } from '../api'
 
 type Listing = {
   id: number
@@ -28,6 +30,8 @@ type Listing = {
   active: boolean
   firstSeenAt: string
   attrs: Record<string, unknown>
+  // When the ad's own page was last read (region, gearbox, ...); null = never.
+  detailedAt?: string | null
 }
 type SavedSearch = {
   id: number
@@ -222,38 +226,99 @@ function listingCategory(listing: Listing): 'cars' | 'flats' | undefined {
   return undefined
 }
 
+// Labels, in the order the specifications are shown; anything else follows.
 const attributeLabels: Record<string, string> = {
-  mileage_km: 'Odometer',
-  engine_l: 'Engine size',
-  fuel: 'Fuel',
-  year: 'Year',
+  make: 'Make',
   model: 'Model',
+  year: 'Year',
+  mileage_km: 'Mileage',
+  engine_l: 'Engine',
+  fuel: 'Fuel',
+  gearbox: 'Gearbox',
+  body: 'Body type',
+  color: 'Colour',
+  seats: 'Seats',
+  region: 'Region',
+  inspection: 'Inspection',
   rooms: 'Rooms',
   area_m2: 'Area',
   floor: 'Floor',
   series: 'Building series',
+  house_type: 'House type',
   district: 'District',
   address: 'Address',
 }
+const attributeOrder = Object.keys(attributeLabels)
 const humanize = (key: string) =>
   attributeLabels[key] ??
   key.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+// Shown in their own sections, not as specifications.
+const ownSection = new Set(['text', 'description', 'equipment'])
+const rank = (key: string) =>
+  attributeOrder.includes(key) ? attributeOrder.indexOf(key) : 999
 
 const listingAttributes = computed(() =>
   Object.entries(openListing.value?.attrs ?? {})
     .filter(
-      ([key, value]) => key !== 'description' && value !== null && value !== '',
+      ([key, value]) => !ownSection.has(key) && value !== null && value !== '',
     )
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
     .map(([key, value]) => ({
       key,
       label: humanize(key),
       value: formatAttribute(key, value),
     })),
 )
+const equipment = computed(() => {
+  const value = openListing.value?.attrs?.equipment
+  return Array.isArray(value) ? value.map(String) : []
+})
+// The ad's own text: "text" from the ad page (older rows: "description").
 const description = computed(() => {
-  const value = openListing.value?.attrs?.description
+  const attrs = openListing.value?.attrs ?? {}
+  const value = attrs.text ?? attrs.description
   return typeof value === 'string' && value.trim() ? value : null
 })
+
+// Reading the open listing's ad page on ss.com, which adds what the list
+// page lacks (a car's region, gearbox, ...). Done once per ad, then saved.
+const details = ref<'idle' | 'loading' | 'failed' | 'gone'>('idle')
+const detailsError = ref('')
+const hasAdPage = (l: Listing) =>
+  l.source === 'ss.com' &&
+  (l.location.startsWith('transport/cars') ||
+    l.location.startsWith('real-estate/'))
+
+async function loadDetails(listing: Listing) {
+  details.value = 'loading'
+  detailsError.value = ''
+  try {
+    const read = await readListingDetails(listing.id)
+    listing.attrs = read.attrs
+    listing.active = read.active
+    listing.detailedAt = read.detailedAt
+    if (openListing.value?.id === listing.id) details.value = 'idle'
+  } catch (reason) {
+    if (openListing.value?.id !== listing.id) return
+    if (reason instanceof ApiError && reason.status === 410) {
+      listing.active = false
+      details.value = 'gone'
+      return
+    }
+    details.value = 'failed'
+    detailsError.value =
+      reason instanceof ApiError ? reason.message : "Couldn't read the ad page."
+  }
+}
+
+watch(
+  () => openListing.value?.id,
+  () => {
+    details.value = 'idle'
+    const l = openListing.value
+    if (l && !l.detailedAt && hasAdPage(l)) void loadDetails(l)
+  },
+)
 
 function formatAttribute(key: string, value: unknown): string {
   if (typeof value === 'number') {
@@ -274,6 +339,7 @@ function formatAttribute(key: string, value: unknown): string {
       )[value] ?? value
     )
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.join(', ')
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
@@ -777,8 +843,56 @@ onUnmounted(() => {
         >Open on {{ openListing.source }}<ArrowUpRight :size="16"
       /></a>
 
-      <section class="mt-8">
-        <h3 class="mb-3 text-sm font-semibold text-gray-900">Specifications</h3>
+      <div
+        v-if="details === 'gone'"
+        role="status"
+        class="message-bar-warning mt-6"
+      >
+        <TriangleAlert :size="16" class="mt-0.5 shrink-0 text-warning-600" />
+        This ad has been removed from {{ openListing.source }}, so only what was
+        collected earlier is shown.
+      </div>
+
+      <section class="mt-8" :aria-busy="details === 'loading'">
+        <div class="mb-3 flex min-h-6 items-center justify-between gap-3">
+          <h3 class="text-sm font-semibold text-gray-900">Specifications</h3>
+          <span
+            v-if="details === 'loading'"
+            class="flex items-center gap-2 text-xs text-gray-500"
+            role="status"
+            ><span
+              class="size-3.5 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600"
+            />Reading the ad page…</span
+          >
+          <span
+            v-else-if="openListing.detailedAt && hasAdPage(openListing)"
+            class="flex items-center gap-1 text-xs text-gray-500"
+            >From the ad page, {{ formatTime(openListing.detailedAt) }}
+            <button
+              class="btn-icon size-6"
+              aria-label="Read the ad page again"
+              title="Read the ad page again"
+              @click="loadDetails(openListing)"
+            >
+              <RefreshCw :size="13" /></button
+          ></span>
+        </div>
+        <div
+          v-if="details === 'failed'"
+          role="alert"
+          class="message-bar-danger mb-4"
+        >
+          <CircleAlert :size="16" class="mt-0.5 shrink-0 text-danger-600" />
+          <span class="flex-1"
+            >{{ detailsError }} Showing what the list page had.</span
+          >
+          <button
+            class="shrink-0 text-small font-medium text-danger-700 hover:underline"
+            @click="loadDetails(openListing)"
+          >
+            Try again
+          </button>
+        </div>
         <dl
           v-if="listingAttributes.length"
           class="grid grid-cols-2 gap-x-6 gap-y-4"
@@ -791,8 +905,27 @@ onUnmounted(() => {
               {{ attribute.value }}
             </dd>
           </div>
+          <template v-if="details === 'loading'">
+            <div v-for="n in 4" :key="n">
+              <div class="skeleton h-3 w-16" />
+              <div class="skeleton mt-1.5 h-4 w-24" />
+            </div>
+          </template>
         </dl>
         <p v-else class="text-sm text-gray-500">No specifications recorded.</p>
+      </section>
+
+      <section v-if="equipment.length" class="mt-8">
+        <h3 class="mb-3 text-sm font-semibold text-gray-900">Equipment</h3>
+        <ul class="flex flex-wrap gap-1.5">
+          <li
+            v-for="item in equipment"
+            :key="item"
+            class="rounded-md bg-gray-100 px-2 py-1 text-small text-gray-800"
+          >
+            {{ item }}
+          </li>
+        </ul>
       </section>
 
       <section class="mt-8">
@@ -803,8 +936,17 @@ onUnmounted(() => {
         >
           {{ description }}
         </p>
+        <div v-else-if="details === 'loading'" class="grid gap-2">
+          <div class="skeleton h-3.5 w-full" />
+          <div class="skeleton h-3.5 w-11/12" />
+          <div class="skeleton h-3.5 w-2/3" />
+        </div>
         <p v-else class="text-sm text-gray-500">
-          Only the summary from the category page was collected.
+          {{
+            openListing.detailedAt
+              ? 'The ad has no description.'
+              : 'Not read from the ad page yet.'
+          }}
         </p>
       </section>
 

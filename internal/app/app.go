@@ -190,7 +190,10 @@ func Matcher(ctx context.Context, cfg config.Matcher, reg sources.Registry) erro
 		return err
 	}
 	defer pool.Close()
-	subs := subscriptions.NewService(pool, reg, cfg.FeedCollapseAt)
+	// Ad pages the matcher reads are saved, so the dashboard can show a
+	// car's region, gearbox, ... without reading the page again.
+	store := listings.NewService(pool, listings.DefaultSeedWindow)
+	subs := subscriptions.NewService(pool, reg, cfg.FeedCollapseAt).WithAdPageHook(adPageSaver(store))
 	if err := subs.Migrate(ctx); err != nil {
 		return err
 	}
@@ -217,6 +220,22 @@ func Matcher(ctx context.Context, cfg config.Matcher, reg sources.Registry) erro
 			slog.Info("matched", "listing", l.ExternalID, "notifications", len(ns))
 			return subs.Record(ctx, ns)
 		})
+}
+
+// adPageSaver stores what an ad page added to a listing. Failing to save is
+// logged, not fatal: the alert matters more than the copy for the dashboard.
+func adPageSaver(store *listings.Service) subscriptions.AdPageHook {
+	return func(ctx context.Context, before, enriched events.ListingDiscovered, gone bool) {
+		var err error
+		if gone {
+			err = store.MarkGone(ctx, before.Source, before.ExternalID)
+		} else {
+			err = store.SaveDetails(ctx, before, enriched)
+		}
+		if err != nil {
+			slog.Warn("could not save ad page details", "listing", before.ExternalID, "err", err)
+		}
+	}
 }
 
 // Notifier delivers notification requests through the given channels.
@@ -312,7 +331,7 @@ func API(ctx context.Context, cfg config.API, reg sources.Registry) error {
 		Addr: cfg.Addr,
 		Handler: web.New(web.Config{
 			Searches: subs, Listings: store, Overview: dashboard.NewHandler(dashboard.Load(pool)),
-			WebDir: webDir, PublicURL: cfg.PublicURL, MaxSearches: cfg.MaxSearches,
+			Sources: reg, WebDir: webDir, PublicURL: cfg.PublicURL, MaxSearches: cfg.MaxSearches,
 		}),
 		ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: time.Minute,
 	}

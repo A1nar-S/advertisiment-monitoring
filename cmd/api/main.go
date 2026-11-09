@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -32,5 +33,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return app.API(ctx, cfg, app.KnownSources(0, 0))
+	// The dashboard reads single ad pages for admins; the timeout leaves room
+	// within the server's 15 s write timeout.
+	return app.API(ctx, cfg, app.KnownSources(10*time.Second, cfg.RequestGap))
 }

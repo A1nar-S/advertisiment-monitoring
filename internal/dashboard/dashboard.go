@@ -55,7 +55,8 @@ SELECT jsonb_build_object(
   ),
   'listings', COALESCE((SELECT jsonb_agg(row_to_json(recent)) FROM (
     SELECT id, source, title, url, location, price, image_url AS "imageUrl",
-           is_active AS active, first_seen_at AS "firstSeenAt", attrs
+           is_active AS active, first_seen_at AS "firstSeenAt",
+           attrs || COALESCE(details, '{}'::jsonb) AS attrs, detailed_at AS "detailedAt"
     FROM listings ORDER BY first_seen_at DESC, id DESC LIMIT 100
   ) recent), '[]'::jsonb),
   'searches', COALESCE((SELECT jsonb_agg(row_to_json(saved)) FROM (

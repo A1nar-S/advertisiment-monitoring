@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/A1nar-S/advertisiment-monitoring/internal/events"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/listings"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions"
@@ -34,19 +36,27 @@ type Searches interface {
 	Channels(ctx context.Context, o subscriptions.Owner) ([]subscriptions.ChannelView, error)
 	RecentMatches(ctx context.Context, o subscriptions.Owner, searchID int64, limit int) ([]subscriptions.MatchRef, error)
 	Categories() map[string][]sources.Category
+	Preview(in subscriptions.SearchInput, candidates []events.ListingDiscovered) (subscriptions.Preview, error)
 }
 
-// Listings looks up stored ads, to show matches.
+// Listings looks up stored ads: to show matches, to preview a search
+// against, and to keep what an ad page adds.
 type Listings interface {
 	Summaries(ctx context.Context, source string, ids []string) (map[string]listings.Summary, error)
+	Recent(ctx context.Context, source string, limit int32) ([]listings.Stored, error)
+	Get(ctx context.Context, id int64) (listings.Stored, error)
+	SaveDetails(ctx context.Context, before, enriched events.ListingDiscovered) error
+	MarkGone(ctx context.Context, source, externalID string) error
 }
 
 type Config struct {
-	Searches    Searches
-	Listings    Listings
-	Overview    http.Handler // the admin overview (GET /api/overview)
-	WebDir      string       // the built app; empty = API only
-	PublicURL   string       // https:// makes the cookie Secure
+	Searches Searches
+	Listings Listings
+	Overview http.Handler // the admin overview (GET /api/overview)
+	// Sources read an ad's own page for an admin (its region, gearbox, ...).
+	Sources     sources.Registry
+	WebDir      string // the built app; empty = API only
+	PublicURL   string // https:// makes the cookie Secure
 	MaxSearches int
 }
 
@@ -79,6 +89,8 @@ func New(cfg Config) http.Handler {
 	mux.Handle("PATCH /api/searches/{id}", s.auth(s.patchSearch))
 	mux.Handle("DELETE /api/searches/{id}", s.auth(s.deleteSearch))
 	mux.Handle("GET /api/matches", s.auth(s.matches))
+	mux.Handle("POST /api/searches/preview", s.auth(s.previewSearch))
+	mux.Handle("POST /api/listings/{id}/details", s.auth(s.listingDetails))
 	if cfg.Overview != nil {
 		mux.Handle("GET /api/overview", s.auth(func(w http.ResponseWriter, r *http.Request, o subscriptions.Owner) {
 			if !o.Admin {
@@ -292,6 +304,130 @@ func (s *server) matches(w http.ResponseWriter, r *http.Request, o subscriptions
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// previewLimit is how many of the newest stored ads a preview checks. Enough
+// for days of a busy feed; each check is a cheap in-memory comparison.
+const previewLimit = 5000
+
+// previewShown caps the ads a preview lists; the counts cover all of them.
+const previewShown = 30
+
+type previewAd struct {
+	ID        int64     `json:"id"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	Price     string    `json:"price"`
+	ImageURL  string    `json:"imageUrl"`
+	Location  string    `json:"location"`
+	FirstSeen time.Time `json:"firstSeen"`
+	Active    bool      `json:"active"`
+	// Sure is false when the ad passes every list-page filter but its ad page
+	// was never read to check the rest (see previewView.UnsureKeys).
+	Sure bool `json:"sure"`
+}
+
+type previewView struct {
+	Scanned    int         `json:"scanned"` // stored ads looked at
+	InScope    int         `json:"inScope"` // of those, in the search's category and area
+	Matched    int         `json:"matched"`
+	Unsure     int         `json:"unsure"`
+	UnsureKeys []string    `json:"unsureKeys"`
+	Since      *time.Time  `json:"since,omitempty"` // the oldest ad looked at
+	Ads        []previewAd `json:"ads"`             // newest first
+}
+
+// previewSearch shows which already collected ads a search, as it is being
+// edited, would have matched. Nothing is saved.
+func (s *server) previewSearch(w http.ResponseWriter, r *http.Request, _ subscriptions.Owner) {
+	b, ok := readBody(w, r)
+	if !ok {
+		return
+	}
+	stored, err := s.Listings.Recent(r.Context(), subscriptions.DefaultSource, previewLimit)
+	if s.fail(w, err) {
+		return
+	}
+	candidates := make([]events.ListingDiscovered, len(stored))
+	for i, st := range stored {
+		candidates[i] = st.Listing
+	}
+	p, err := s.Searches.Preview(subscriptions.SearchInput{Category: b.Category, Filters: b.Filters}, candidates)
+	if s.fail(w, err) {
+		return
+	}
+	out := previewView{
+		Scanned: len(stored), InScope: p.InScope, Matched: len(p.Matched), Unsure: len(p.Unsure),
+		UnsureKeys: nonNil(p.UnsureKeys), Ads: []previewAd{},
+	}
+	if n := len(stored); n > 0 {
+		out.Since = &stored[n-1].FirstSeen
+	}
+	// Indexes follow the store's newest-first order, so sorting the merged
+	// list keeps it newest first.
+	sure := make(map[int]bool, len(p.Matched))
+	for _, i := range p.Matched {
+		sure[i] = true
+	}
+	picked := append(append([]int(nil), p.Matched...), p.Unsure...)
+	slices.Sort(picked)
+	for _, i := range picked[:min(len(picked), previewShown)] {
+		st := stored[i]
+		out.Ads = append(out.Ads, previewAd{
+			ID: st.ID, Title: st.Listing.Title, URL: st.Listing.URL, Price: st.Listing.Price,
+			ImageURL: st.Listing.ImageURL, Location: st.Listing.Location, FirstSeen: st.FirstSeen,
+			Active: st.Active, Sure: sure[i],
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// listingDetails reads one stored ad's own page now (for an admin, from the
+// overview), saves what it adds and returns the listing's attrs.
+func (s *server) listingDetails(w http.ResponseWriter, r *http.Request, o subscriptions.Owner) {
+	if !o.Admin {
+		writeError(w, http.StatusForbidden, "admins only")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no such listing")
+		return
+	}
+	st, err := s.Listings.Get(r.Context(), id)
+	if errors.Is(err, listings.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such listing")
+		return
+	}
+	if s.fail(w, err) {
+		return
+	}
+	src, _ := s.Sources[st.Listing.Source].(sources.Enricher)
+	if src == nil {
+		writeError(w, http.StatusUnprocessableEntity, st.Listing.Source+" ads have no more details to read")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	enriched, err := src.Enrich(ctx, st.Listing)
+	switch {
+	case errors.Is(err, sources.ErrGone):
+		if s.fail(w, s.Listings.MarkGone(r.Context(), st.Listing.Source, st.Listing.ExternalID)) {
+			return
+		}
+		writeError(w, http.StatusGone, "This ad has been removed from "+st.Listing.Source+".")
+		return
+	case err != nil:
+		slog.Warn("read ad page", "listing", id, "err", err)
+		writeError(w, http.StatusBadGateway, "Couldn't read the ad page on "+st.Listing.Source+". Try again in a moment.")
+		return
+	}
+	if s.fail(w, s.Listings.SaveDetails(r.Context(), st.Listing, enriched)) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"attrs": enriched.Attrs, "active": st.Active, "detailedAt": time.Now().UTC(),
+	})
 }
 
 // --- helpers --------------------------------------------------------------------

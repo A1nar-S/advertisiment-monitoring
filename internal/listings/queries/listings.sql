@@ -2,11 +2,12 @@
 -- Inserts a listing or refreshes a known one. xmax is zero only on a fresh
 -- insert, which tells the caller whether the listing is new.
 INSERT INTO listings (
-    source, external_id, title, url, location, attrs, price, price_value, image_url, posted_at
+    source, external_id, feed, title, url, location, attrs, price, price_value, image_url, posted_at
 ) VALUES (
-    @source, @external_id, @title, @url, @location, @attrs, @price, @price_value, @image_url, @posted_at
+    @source, @external_id, @feed, @title, @url, @location, @attrs, @price, @price_value, @image_url, @posted_at
 )
 ON CONFLICT (source, external_id) DO UPDATE SET
+    feed         = CASE WHEN listings.feed = '' THEN EXCLUDED.feed ELSE listings.feed END,
     title        = EXCLUDED.title,
     url          = EXCLUDED.url,
     location     = EXCLUDED.location,
@@ -56,5 +57,30 @@ SELECT external_id FROM listings WHERE source = @source AND external_id = ANY(@i
 SELECT EXISTS (SELECT 1 FROM feed_state WHERE source = @source AND feed = @feed) AS seen;
 
 -- name: GetListings :many
-SELECT external_id, title, url, location, price, image_url, attrs, first_seen_at, is_active
+SELECT external_id, title, url, location, price, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, first_seen_at, is_active
 FROM listings WHERE source = @source AND external_id = ANY(@ids::text[]);
+
+-- name: RecentListings :many
+-- The newest stored ads of a source, with the ad-page details merged in: what
+-- a search preview is checked against.
+SELECT id, external_id, feed, title, url, location, price, price_value, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, posted_at, first_seen_at, is_active
+FROM listings WHERE source = @source
+ORDER BY first_seen_at DESC, id DESC
+LIMIT @max_rows;
+
+-- name: GetListingByID :one
+SELECT id, source, external_id, feed, title, url, location, price, price_value, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, posted_at, first_seen_at, is_active,
+       detailed_at
+FROM listings WHERE id = @id;
+
+-- name: SaveListingDetails :exec
+-- details replaces the previous read: the ad page is the whole truth.
+UPDATE listings SET details = @details, detailed_at = now()
+WHERE source = @source AND external_id = @external_id;
+
+-- name: MarkListingGone :exec
+-- The ad's page says it was removed; the next purge forgets it.
+UPDATE listings SET is_active = FALSE WHERE source = @source AND external_id = @external_id;

@@ -60,8 +60,57 @@ func (q *Queries) FeedSeen(ctx context.Context, arg FeedSeenParams) (bool, error
 	return seen, err
 }
 
+const getListingByID = `-- name: GetListingByID :one
+SELECT id, source, external_id, feed, title, url, location, price, price_value, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, posted_at, first_seen_at, is_active,
+       detailed_at
+FROM listings WHERE id = $1
+`
+
+type GetListingByIDRow struct {
+	ID          int64
+	Source      string
+	ExternalID  string
+	Feed        string
+	Title       string
+	Url         string
+	Location    string
+	Price       string
+	PriceValue  *float64
+	ImageUrl    string
+	Attrs       []byte
+	PostedAt    pgtype.Timestamptz
+	FirstSeenAt pgtype.Timestamptz
+	IsActive    bool
+	DetailedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) GetListingByID(ctx context.Context, id int64) (GetListingByIDRow, error) {
+	row := q.db.QueryRow(ctx, getListingByID, id)
+	var i GetListingByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Source,
+		&i.ExternalID,
+		&i.Feed,
+		&i.Title,
+		&i.Url,
+		&i.Location,
+		&i.Price,
+		&i.PriceValue,
+		&i.ImageUrl,
+		&i.Attrs,
+		&i.PostedAt,
+		&i.FirstSeenAt,
+		&i.IsActive,
+		&i.DetailedAt,
+	)
+	return i, err
+}
+
 const getListings = `-- name: GetListings :many
-SELECT external_id, title, url, location, price, image_url, attrs, first_seen_at, is_active
+SELECT external_id, title, url, location, price, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, first_seen_at, is_active
 FROM listings WHERE source = $1 AND external_id = ANY($2::text[])
 `
 
@@ -152,6 +201,21 @@ func (q *Queries) KnownIDs(ctx context.Context, arg KnownIDsParams) ([]string, e
 	return items, nil
 }
 
+const markListingGone = `-- name: MarkListingGone :exec
+UPDATE listings SET is_active = FALSE WHERE source = $1 AND external_id = $2
+`
+
+type MarkListingGoneParams struct {
+	Source     string
+	ExternalID string
+}
+
+// The ad's page says it was removed; the next purge forgets it.
+func (q *Queries) MarkListingGone(ctx context.Context, arg MarkListingGoneParams) error {
+	_, err := q.db.Exec(ctx, markListingGone, arg.Source, arg.ExternalID)
+	return err
+}
+
 const markOutboxPublished = `-- name: MarkOutboxPublished :exec
 UPDATE listings_outbox SET published_at = now() WHERE id = ANY($1::bigint[])
 `
@@ -188,6 +252,88 @@ func (q *Queries) PurgeStaleListings(ctx context.Context, olderThanSeconds float
 	return result.RowsAffected(), nil
 }
 
+const recentListings = `-- name: RecentListings :many
+SELECT id, external_id, feed, title, url, location, price, price_value, image_url,
+       (attrs || COALESCE(details, '{}'::jsonb))::jsonb AS attrs, posted_at, first_seen_at, is_active
+FROM listings WHERE source = $1
+ORDER BY first_seen_at DESC, id DESC
+LIMIT $2
+`
+
+type RecentListingsParams struct {
+	Source  string
+	MaxRows int32
+}
+
+type RecentListingsRow struct {
+	ID          int64
+	ExternalID  string
+	Feed        string
+	Title       string
+	Url         string
+	Location    string
+	Price       string
+	PriceValue  *float64
+	ImageUrl    string
+	Attrs       []byte
+	PostedAt    pgtype.Timestamptz
+	FirstSeenAt pgtype.Timestamptz
+	IsActive    bool
+}
+
+// The newest stored ads of a source, with the ad-page details merged in: what
+// a search preview is checked against.
+func (q *Queries) RecentListings(ctx context.Context, arg RecentListingsParams) ([]RecentListingsRow, error) {
+	rows, err := q.db.Query(ctx, recentListings, arg.Source, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecentListingsRow
+	for rows.Next() {
+		var i RecentListingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExternalID,
+			&i.Feed,
+			&i.Title,
+			&i.Url,
+			&i.Location,
+			&i.Price,
+			&i.PriceValue,
+			&i.ImageUrl,
+			&i.Attrs,
+			&i.PostedAt,
+			&i.FirstSeenAt,
+			&i.IsActive,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const saveListingDetails = `-- name: SaveListingDetails :exec
+UPDATE listings SET details = $1, detailed_at = now()
+WHERE source = $2 AND external_id = $3
+`
+
+type SaveListingDetailsParams struct {
+	Details    []byte
+	Source     string
+	ExternalID string
+}
+
+// details replaces the previous read: the ad page is the whole truth.
+func (q *Queries) SaveListingDetails(ctx context.Context, arg SaveListingDetailsParams) error {
+	_, err := q.db.Exec(ctx, saveListingDetails, arg.Details, arg.Source, arg.ExternalID)
+	return err
+}
+
 const touchFeed = `-- name: TouchFeed :one
 INSERT INTO feed_state (source, feed) VALUES ($1, $2)
 ON CONFLICT (source, feed) DO UPDATE SET source = EXCLUDED.source
@@ -210,11 +356,12 @@ func (q *Queries) TouchFeed(ctx context.Context, arg TouchFeedParams) (float64, 
 
 const upsertListing = `-- name: UpsertListing :one
 INSERT INTO listings (
-    source, external_id, title, url, location, attrs, price, price_value, image_url, posted_at
+    source, external_id, feed, title, url, location, attrs, price, price_value, image_url, posted_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 ON CONFLICT (source, external_id) DO UPDATE SET
+    feed         = CASE WHEN listings.feed = '' THEN EXCLUDED.feed ELSE listings.feed END,
     title        = EXCLUDED.title,
     url          = EXCLUDED.url,
     location     = EXCLUDED.location,
@@ -230,6 +377,7 @@ RETURNING (xmax = 0)::boolean AS is_new
 type UpsertListingParams struct {
 	Source     string
 	ExternalID string
+	Feed       string
 	Title      string
 	Url        string
 	Location   string
@@ -246,6 +394,7 @@ func (q *Queries) UpsertListing(ctx context.Context, arg UpsertListingParams) (b
 	row := q.db.QueryRow(ctx, upsertListing,
 		arg.Source,
 		arg.ExternalID,
+		arg.Feed,
 		arg.Title,
 		arg.Url,
 		arg.Location,

@@ -29,6 +29,9 @@ type Listing struct {
 	IsActive    bool
 	Location    string
 	Attrs       []byte
+	Feed        string
+	Details     []byte
+	DetailedAt  pgtype.Timestamptz
 }
 
 type ListingsOutbox struct {

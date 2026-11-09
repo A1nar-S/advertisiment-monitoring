@@ -12,9 +12,11 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -181,6 +183,96 @@ func (s *Service) Summaries(ctx context.Context, source string, ids []string) (m
 	return out, nil
 }
 
+// ErrNotFound: no stored listing with that ID (or it was purged).
+var ErrNotFound = errors.New("listing not found")
+
+// Stored is a stored listing as the matcher sees one (ad-page details merged
+// into Attrs), plus what only the store knows.
+type Stored struct {
+	ID         int64
+	Listing    events.ListingDiscovered
+	FirstSeen  time.Time
+	Active     bool
+	DetailedAt *time.Time // when the ad page was last read; nil = never
+}
+
+// Recent returns up to limit of a source's newest stored listings.
+func (s *Service) Recent(ctx context.Context, source string, limit int32) ([]Stored, error) {
+	rows, err := s.q.RecentListings(ctx, listingsdb.RecentListingsParams{Source: source, MaxRows: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Stored, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Stored{
+			ID:        r.ID,
+			Listing:   fromRow(source, r.ExternalID, r.Feed, r.Title, r.Url, r.Location, r.Price, r.PriceValue, r.ImageUrl, r.Attrs, r.PostedAt),
+			FirstSeen: r.FirstSeenAt.Time,
+			Active:    r.IsActive,
+		})
+	}
+	return out, nil
+}
+
+// Get returns one stored listing by its row ID.
+func (s *Service) Get(ctx context.Context, id int64) (Stored, error) {
+	r, err := s.q.GetListingByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Stored{}, ErrNotFound
+	}
+	if err != nil {
+		return Stored{}, err
+	}
+	st := Stored{
+		ID:        r.ID,
+		Listing:   fromRow(r.Source, r.ExternalID, r.Feed, r.Title, r.Url, r.Location, r.Price, r.PriceValue, r.ImageUrl, r.Attrs, r.PostedAt),
+		FirstSeen: r.FirstSeenAt.Time,
+		Active:    r.IsActive,
+	}
+	if r.DetailedAt.Valid {
+		st.DetailedAt = &r.DetailedAt.Time
+	}
+	return st, nil
+}
+
+// SaveDetails keeps what an ad page added to a listing (enriched, compared
+// with the feed's version before), so the dashboard can show it and
+// previews can filter on it. The feed's attrs are left alone: every scrape
+// rewrites them.
+func (s *Service) SaveDetails(ctx context.Context, before, enriched events.ListingDiscovered) error {
+	details := map[string]any{}
+	for k, v := range enriched.Attrs {
+		if old, ok := before.Attrs[k]; !ok || !reflect.DeepEqual(old, v) {
+			details[k] = v
+		}
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+	return s.q.SaveListingDetails(ctx, listingsdb.SaveListingDetailsParams{
+		Details: raw, Source: enriched.Source, ExternalID: enriched.ExternalID,
+	})
+}
+
+// MarkGone records that a listing's ad page is gone.
+func (s *Service) MarkGone(ctx context.Context, source, externalID string) error {
+	return s.q.MarkListingGone(ctx, listingsdb.MarkListingGoneParams{Source: source, ExternalID: externalID})
+}
+
+func fromRow(source, externalID, feed, title, url, location, price string, priceValue *float64,
+	imageURL string, attrs []byte, postedAt pgtype.Timestamptz) events.ListingDiscovered {
+	l := events.ListingDiscovered{
+		Source: source, ExternalID: externalID, Feed: feed, Location: location,
+		Title: title, URL: url, ImageURL: imageURL, Price: price, PriceValue: priceValue,
+		PostedAt: postedAt.Time,
+	}
+	// Numbers come back as float64, as after the Kafka round trip the
+	// matcher normally sees.
+	_ = json.Unmarshal(attrs, &l.Attrs)
+	return l
+}
+
 // Purge deletes listings not seen on any feed for olderThan, and published
 // outbox entries older than a day.
 func (s *Service) Purge(ctx context.Context, olderThan time.Duration) (int64, error) {
@@ -205,6 +297,7 @@ func upsertParams(l events.ListingDiscovered) (listingsdb.UpsertListingParams, e
 	return listingsdb.UpsertListingParams{
 		Source:     l.Source,
 		ExternalID: l.ExternalID,
+		Feed:       l.Feed,
 		Title:      l.Title,
 		Url:        l.URL,
 		Location:   l.Location,

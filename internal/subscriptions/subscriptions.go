@@ -39,6 +39,20 @@ type Service struct {
 
 	maxSearches int             // per user; 0 = unlimited
 	admins      map[string]bool // Discord IDs
+
+	adPage AdPageHook // optional; see WithAdPageHook
+}
+
+// AdPageHook hears about every ad page the matcher reads: enriched is the
+// listing with the page's facts added, or gone is set when the ad was removed.
+type AdPageHook func(ctx context.Context, before, enriched events.ListingDiscovered, gone bool)
+
+// WithAdPageHook lets the caller keep what the matcher reads from ad pages
+// (it reads them anyway for searches that filter on ad-page facts), so those
+// facts are not thrown away after the alert.
+func (s *Service) WithAdPageHook(h AdPageHook) *Service {
+	s.adPage = h
+	return s
 }
 
 // NewService. collapseAt is how many sibling feeds a source may merge into
@@ -132,6 +146,9 @@ func (s *Service) Notifications(ctx context.Context, l events.ListingDiscovered)
 		switch {
 		case errors.Is(err, sources.ErrGone):
 			slog.Info("ad removed before its page was read", "id", l.ExternalID)
+			if s.adPage != nil {
+				s.adPage(ctx, l, l, true)
+			}
 		case err != nil:
 			// Better an unconfirmed alert than a missed deal: tell the
 			// candidates, flagged, rather than failing (and so dropping) the
@@ -140,6 +157,9 @@ func (s *Service) Notifications(ctx context.Context, l events.ListingDiscovered)
 			l.Fields = append(l.Fields, events.Field{Name: "⚠️ Unconfirmed", Value: "Could not read the ad page to check: " + strings.Join(pendingKeys(pending, l, enrichable), ", ")})
 			matched = append(matched, pending...)
 		default:
+			if s.adPage != nil {
+				s.adPage(ctx, l, enriched, false)
+			}
 			l = enriched
 			for _, search := range pending {
 				if search.Evaluate(src, l, nil) == Matched {
