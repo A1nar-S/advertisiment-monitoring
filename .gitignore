@@ -1,5 +1,4 @@
 .env
-config/users.yaml
 
 # Postgre + Kafka volumes
 infra/postgres/pg-data/

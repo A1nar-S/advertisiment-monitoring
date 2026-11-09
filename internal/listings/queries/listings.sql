@@ -54,3 +54,7 @@ SELECT external_id FROM listings WHERE source = @source AND external_id = ANY(@i
 
 -- name: FeedSeen :one
 SELECT EXISTS (SELECT 1 FROM feed_state WHERE source = @source AND feed = @feed) AS seen;
+
+-- name: GetListings :many
+SELECT external_id, title, url, location, price, image_url, attrs, first_seen_at, is_active
+FROM listings WHERE source = @source AND external_id = ANY(@ids::text[]);

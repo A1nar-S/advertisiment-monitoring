@@ -60,6 +60,58 @@ func (q *Queries) FeedSeen(ctx context.Context, arg FeedSeenParams) (bool, error
 	return seen, err
 }
 
+const getListings = `-- name: GetListings :many
+SELECT external_id, title, url, location, price, image_url, attrs, first_seen_at, is_active
+FROM listings WHERE source = $1 AND external_id = ANY($2::text[])
+`
+
+type GetListingsParams struct {
+	Source string
+	Ids    []string
+}
+
+type GetListingsRow struct {
+	ExternalID  string
+	Title       string
+	Url         string
+	Location    string
+	Price       string
+	ImageUrl    string
+	Attrs       []byte
+	FirstSeenAt pgtype.Timestamptz
+	IsActive    bool
+}
+
+func (q *Queries) GetListings(ctx context.Context, arg GetListingsParams) ([]GetListingsRow, error) {
+	rows, err := q.db.Query(ctx, getListings, arg.Source, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetListingsRow
+	for rows.Next() {
+		var i GetListingsRow
+		if err := rows.Scan(
+			&i.ExternalID,
+			&i.Title,
+			&i.Url,
+			&i.Location,
+			&i.Price,
+			&i.ImageUrl,
+			&i.Attrs,
+			&i.FirstSeenAt,
+			&i.IsActive,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertOutbox = `-- name: InsertOutbox :exec
 INSERT INTO listings_outbox (payload) VALUES ($1)
 `

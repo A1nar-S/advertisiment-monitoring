@@ -3,7 +3,8 @@
 #   docker compose --env-file .env -f infra/docker-compose.yml up -d                      # Postgres + Kafka only
 #   docker compose --env-file .env -f infra/docker-compose.yml --profile app up -d --build # + the services
 #
-# `make up` / `make infra` in the repo root run exactly these.
+# `make up` / `make infra` in the repo root run exactly these. Searches are
+# made by users through the bot and the dashboard; there is no config file.
 x-service: &service
   build:
     context: ..
@@ -17,11 +18,6 @@ x-service: &service
     DB_HOST: postgres
     DB_PORT: "5432"
     KAFKA_BROKERS: kafka:29092
-    USERS_FILE: /config/users.yaml
-  volumes:
-    # users.yaml is gitignored and kept out of the image; edit it on the host
-    # and `make reload-users`.
-    - ../config:/config:ro
   depends_on:
     postgres: {condition: service_healthy}
     kafka-init: {condition: service_completed_successfully}
@@ -110,7 +106,23 @@ services:
   notifier:
     <<: *service
     build: {context: .., args: {CMD: notifier}}
-  # One-off maintenance: `make purge`, or `... --profile tools run --rm admin seed`.
+  # The chat bot people manage their searches with (/watch, /searches, /dashboard).
+  bot:
+    <<: *service
+    build: {context: .., args: {CMD: bot}}
+  # The dashboard. Bound to this machine only; publish it with a tunnel
+  # (PUBLIC_URL in .env) if others should reach it.
+  api:
+    <<: *service
+    build: {context: .., args: {CMD: api}}
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      KAFKA_BROKERS: kafka:29092
+      API_ADDR: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8080:8080"
+  # One-off maintenance: `make purge`, or `... --profile tools run --rm admin migrate`.
   admin:
     <<: *service
     profiles: [tools]

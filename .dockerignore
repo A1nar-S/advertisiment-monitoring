@@ -2,4 +2,5 @@
 .env
 infra
 prompt.txt
-config/users.yaml
+web/node_modules
+web/dist

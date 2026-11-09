@@ -106,7 +106,6 @@ func IngestFromEnv() (Ingest, error) {
 
 type Matcher struct {
 	Common
-	UsersFile      string // optional; seeded on start when set
 	FeedCollapseAt int
 	// RequestTimeout and RequestGap apply to ad pages the matcher reads when a
 	// search filters on something the feed list does not show.
@@ -117,7 +116,6 @@ type Matcher struct {
 func MatcherFromEnv() (Matcher, error) {
 	c := Matcher{
 		Common:         commonFromEnv(),
-		UsersFile:      os.Getenv("USERS_FILE"),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
 		RequestTimeout: time.Duration(envInt("REQUEST_TIMEOUT", 30)) * time.Second,
 		RequestGap:     time.Duration(envInt("REQUEST_GAP_SECONDS", 2)) * time.Second,
@@ -158,7 +156,6 @@ func NotifierFromEnv() (Notifier, error) {
 
 type Admin struct {
 	Common
-	UsersFile      string
 	FeedCollapseAt int
 	Retention      time.Duration
 }
@@ -166,7 +163,6 @@ type Admin struct {
 func AdminFromEnv() (Admin, error) {
 	c := Admin{
 		Common:         commonFromEnv(),
-		UsersFile:      env("USERS_FILE", "config/users.yaml"),
 		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
 		Retention:      time.Duration(envInt("RETENTION_HOURS", 60*24)) * time.Hour,
 	}
@@ -174,6 +170,73 @@ func AdminFromEnv() (Admin, error) {
 		return c, errors.New("RETENTION_HOURS must be positive")
 	}
 	return c, nil
+}
+
+// SelfService is how users manage their own searches (bot and dashboard).
+type SelfService struct {
+	// MaxSearches per user; admins are exempt. 0 = unlimited.
+	MaxSearches int
+	// Admins may see and edit everyone's searches: chat accounts written
+	// "platform:id", e.g. "discord:123456789012345678".
+	Admins []string
+	// PublicURL is where people open the dashboard, e.g.
+	// https://ads.example.com; login links point there.
+	PublicURL string
+}
+
+func selfServiceFromEnv() SelfService {
+	var admins []string
+	for _, a := range strings.Split(os.Getenv("ADMIN_USERS"), ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			admins = append(admins, a)
+		}
+	}
+	return SelfService{
+		MaxSearches: envInt("MAX_SEARCHES_PER_USER", 10),
+		Admins:      admins,
+		PublicURL:   strings.TrimRight(env("PUBLIC_URL", "http://127.0.0.1:8080"), "/"),
+	}
+}
+
+// Bot is the chat bot users talk to (/watch, /searches, /dashboard). Each
+// platform with a token is served; Discord for now.
+type Bot struct {
+	Common
+	SelfService
+	DiscordBotToken string
+	// GuildID registers the commands on one server only: they update
+	// instantly there, while global commands can take a while.
+	GuildID        string
+	FeedCollapseAt int
+}
+
+func BotFromEnv() (Bot, error) {
+	c := Bot{
+		Common: commonFromEnv(), SelfService: selfServiceFromEnv(),
+		DiscordBotToken: os.Getenv("DISCORD_BOT_TOKEN"), GuildID: os.Getenv("DISCORD_GUILD_ID"),
+		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
+	}
+	if c.DiscordBotToken == "" {
+		return c, errors.New("DISCORD_BOT_TOKEN is required")
+	}
+	return c, nil
+}
+
+// API serves the dashboard and its JSON API.
+type API struct {
+	Common
+	SelfService
+	Addr           string // listen address
+	WebDir         string // built dashboard (web/dist); empty = API only
+	FeedCollapseAt int
+}
+
+func APIFromEnv() (API, error) {
+	return API{
+		Common: commonFromEnv(), SelfService: selfServiceFromEnv(),
+		Addr: env("API_ADDR", "127.0.0.1:8080"), WebDir: env("WEB_DIR", "web/dist"),
+		FeedCollapseAt: envInt("FEED_COLLAPSE_AT", 3),
+	}, nil
 }
 
 func env(key, def string) string {

@@ -1,92 +1,104 @@
 package ss
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 )
 
-// NormalizeSearch implements sources.SearchNormalizer. Searches are written
-// in the terms of ss.com's own search forms and checked against the codebooks.
+// Category IDs users pick from; each has a codebook.
+const (
+	CategoryCars  = "cars"
+	CategoryFlats = "flats"
+)
+
+// CompileSearch implements sources.Catalog. Searches are written in the
+// terms of ss.com's own search forms and checked against the codebooks.
 //
-// Cars (feeds: [transport/cars]): all filters run locally on the one shared
-// feed.
+// Cars: every filter runs locally on the one shared transport/cars feed.
 //
 //	make: [Skoda, Toyota]     model: [Octavia, "Passat*"]     fuel: [Dīzelis]
-//	gearbox: Automāts         year: {min: 2012}               equipment: [Kondicionieris]
+//	gearbox: [Automāts]       year: {min: 2012}               equipment: [Kondicionieris]
+//	region: [Rīga, Rīgas rajons]   (read from the ad page, like gearbox)
 //
-// Flats (feeds: [real-estate/flats]): region, district and deal choose the
-// feeds; the rest are filters.
+// Flats: region, district and deal choose the feeds; the rest are filters.
 //
-//	region: Rīga   district: [Centrs, Teika]   deal: Izīrē   rooms: {min: 2}   series: [Jaun.]
+//	region: [Rīga]   district: [Centrs, Teika]   deal: [Izīrē]   rooms: {min: 2}   series: [Jaun.]
 //
-// Names ignore case and diacritics and come back spelled as on ss.com. Feeds
-// given as full paths (real-estate/flats/riga/centre/hand_over) keep their
-// filters as written.
-func (*Client) NormalizeSearch(feeds []string, filters map[string]any) ([]string, map[string]any, error) {
-	cars := 0
-	for _, f := range feeds {
-		if scope := parseFeed(f).scope; scope == CarsCategory || strings.HasPrefix(scope, CarsCategory+"/") {
-			cars++
+// Names ignore case and diacritics and come back spelled as on ss.com.
+func (*Client) CompileSearch(category string, filters map[string]any) (sources.Compiled, error) {
+	var c sources.Compiled
+	var err error
+	switch category {
+	case CategoryCars:
+		var cb *Codebook
+		if cb, err = CarsCodebook(); err != nil {
+			return c, err
 		}
+		c.Feeds = []string{CarsCategory}
+		c.Filters, c.Spec, err = cb.normalize(filters)
+	case CategoryFlats:
+		var cb *Codebook
+		if cb, err = FlatsCodebook(); err != nil {
+			return c, err
+		}
+		c.Feeds, c.Filters, c.Spec, err = cb.flatSearch(filters)
+	default:
+		return c, &sources.InvalidSearch{Msg: fmt.Sprintf("unknown category %q; choose %s or %s", category, CategoryCars, CategoryFlats)}
 	}
-	switch {
-	case cars > 0 && cars != len(feeds):
-		return nil, nil, fmt.Errorf("a search cannot mix %s feeds with other categories", CarsCategory)
-	case cars > 0:
-		cb, err := CarsCodebook()
-		if err != nil {
-			return nil, nil, err
+	if err != nil {
+		var inv *sources.InvalidSearch
+		if !errors.As(err, &inv) {
+			err = &sources.InvalidSearch{Msg: err.Error()}
 		}
-		out, err := cb.normalize(filters)
-		return feeds, out, err
-	case len(feeds) == 1 && strings.Trim(feeds[0], "/") == FlatsCategory:
-		cb, err := FlatsCodebook()
-		if err != nil {
-			return nil, nil, err
-		}
-		return cb.flatSearch(filters)
+		return sources.Compiled{}, err
 	}
-	return feeds, filters, nil
+	return c, nil
 }
 
 // flatSearch turns region/district/deal into feeds and checks the rest.
-func (cb *Codebook) flatSearch(in map[string]any) ([]string, map[string]any, error) {
+func (cb *Codebook) flatSearch(in map[string]any) (feeds []string, filters, spec map[string]any, err error) {
 	regionNames, err := stringList("region", in["region"])
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	districtNames, err := stringList("district", in["district"])
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	dealNames, err := stringList("deal", in["deal"])
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	dealField, _ := cb.Field("deal")
 	if len(regionNames) == 0 {
-		return nil, nil, fmt.Errorf("flats: region is required, e.g. region: Rīga")
+		return nil, nil, nil, errors.New("choose a region, e.g. Rīga")
 	}
 	if len(dealNames) == 0 {
-		return nil, nil, fmt.Errorf("flats: deal is required: %s (Izīrē = for rent)", strings.Join(dealField.optionNames(), ", "))
+		return nil, nil, nil, fmt.Errorf("choose a deal: %s (Izīrē = for rent)", strings.Join(dealField.optionNames(), ", "))
 	}
 
 	var regions []*Region
+	var shownRegions, shownDistricts, shownDeals []string
 	for _, n := range regionNames {
 		r, ok := cb.Region(n)
 		if !ok {
-			return nil, nil, fmt.Errorf("unknown region %q%s", n, didYouMean(n, cb.regionNames()))
+			return nil, nil, nil, fmt.Errorf("unknown region %q%s", n, didYouMean(n, cb.regionNames()))
 		}
 		regions = append(regions, r)
+		shownRegions = append(shownRegions, r.Name)
 	}
 	var deals []string
 	for _, n := range dealNames {
 		o, err := dealField.lookup(n)
 		if err != nil {
-			return nil, nil, fmt.Errorf("filter \"deal\": %w", err)
+			return nil, nil, nil, fmt.Errorf("deal: %w", err)
 		}
 		deals = append(deals, o.ID)
+		shownDeals = append(shownDeals, o.Name)
 	}
 
 	// Each district goes with the region that has it; a region given no
@@ -98,6 +110,7 @@ func (cb *Codebook) flatSearch(in map[string]any) ([]string, map[string]any, err
 		for _, r := range regions {
 			if d, ok := r.District(n); ok {
 				areas[r] = append(areas[r], d.ID)
+				shownDistricts = append(shownDistricts, d.Name)
 				found = true
 				break
 			}
@@ -106,10 +119,9 @@ func (cb *Codebook) flatSearch(in map[string]any) ([]string, map[string]any, err
 			}
 		}
 		if !found {
-			return nil, nil, fmt.Errorf("unknown district %q in %s%s", n, strings.Join(regionNames, ", "), didYouMean(n, all))
+			return nil, nil, nil, fmt.Errorf("unknown district %q in %s%s", n, strings.Join(shownRegions, ", "), didYouMean(n, all))
 		}
 	}
-	var feeds []string
 	for _, r := range regions {
 		ds := areas[r]
 		if len(ds) == 0 {
@@ -128,12 +140,22 @@ func (cb *Codebook) flatSearch(in map[string]any) ([]string, map[string]any, err
 			rest[k] = v
 		}
 	}
-	out, err := cb.normalize(rest)
-	return feeds, out, err
+	filters, spec, err = cb.normalize(rest)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	spec["region"], spec["deal"] = toAny(shownRegions), toAny(shownDeals)
+	if len(shownDistricts) > 0 {
+		spec["district"] = toAny(shownDistricts)
+	}
+	return feeds, filters, spec, nil
 }
 
-func (cb *Codebook) normalize(in map[string]any) (map[string]any, error) {
-	out := map[string]any{}
+// normalize checks filters against the codebook. It returns what the matcher
+// runs on (wildcards and aliases expanded) and what the user sees again
+// (their own choices, canonically spelled).
+func (cb *Codebook) normalize(in map[string]any) (compiled, shown map[string]any, err error) {
+	compiled, shown = map[string]any{}, map[string]any{}
 	var makes []*Make
 	// Makes first: models are checked against them.
 	keys := make([]string, 0, len(in))
@@ -141,65 +163,171 @@ func (cb *Codebook) normalize(in map[string]any) (map[string]any, error) {
 		keys = append(keys, k)
 	}
 	slices.SortFunc(keys, func(a, b string) int {
-		return boolInt(b == "make") - boolInt(a == "make")
+		if d := boolInt(b == "make") - boolInt(a == "make"); d != 0 {
+			return d
+		}
+		return strings.Compare(a, b)
 	})
 
 	for _, key := range keys {
 		v := in[key]
+		if key == KeywordsKey && cb.Category == CarsCategory {
+			words, err := keywords(v)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(words) > 0 {
+				compiled[TextAttr] = map[string]any{"contains": toAny(words)}
+				shown[key] = toAny(words)
+			}
+			continue
+		}
 		f, ok := cb.Field(key)
-		if !ok {
-			return nil, fmt.Errorf("unknown filter %q%s; valid: %s", key, didYouMean(key, cb.Keys()), strings.Join(cb.Keys(), ", "))
+		if !ok || f.From == fromFeed {
+			valid := cb.Keys()
+			if cb.Category == CarsCategory {
+				valid = append(valid, KeywordsKey)
+			}
+			return nil, nil, fmt.Errorf("unknown filter %q%s; valid: %s", key, didYouMean(key, valid), strings.Join(valid, ", "))
 		}
 		if f.Kind == kindRange {
-			if _, ok := v.(map[string]any); !ok {
-				return nil, fmt.Errorf("filter %q: write a range as {min: ..., max: ...}", key)
+			r, err := rangeOf(f, v)
+			if err != nil {
+				return nil, nil, err
 			}
-			out[key] = v
+			if len(r) > 0 {
+				compiled[key], shown[key] = r, r
+			}
 			continue
 		}
 
 		names, err := stringList(key, v)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(names) == 0 {
-			continue // empty list = any
+			continue // empty = any
 		}
-		var canon []string
+		var canon, show []string
 		switch key {
 		case "make":
 			for _, n := range names {
 				m, ok := cb.MakeByName(n)
 				if !ok {
-					return nil, fmt.Errorf("unknown make %q%s", n, didYouMean(n, cb.makeNames()))
+					return nil, nil, fmt.Errorf("unknown make %q%s", n, didYouMean(n, cb.makeNames()))
 				}
 				makes = append(makes, m)
 				canon = append(canon, m.Name)
 			}
+			show = canon
 		case "model":
-			if canon, err = cb.models(names, makes); err != nil {
-				return nil, err
+			if canon, show, err = cb.models(names, makes); err != nil {
+				return nil, nil, err
 			}
 		case "fuel":
-			if canon, err = fuels(f, names); err != nil {
-				return nil, err
+			if canon, show, err = fuels(f, names); err != nil {
+				return nil, nil, err
 			}
 		default:
 			for _, n := range names {
 				o, err := f.lookup(n)
 				if err != nil {
-					return nil, fmt.Errorf("filter %q: %w", key, err)
+					return nil, nil, fmt.Errorf("%s: %w", f.Label, err)
 				}
 				canon = append(canon, o.Name)
 			}
+			show = canon
 		}
+		canon, show = uniq(canon), uniq(show)
+		shown[key] = toAny(show)
 		if f.Kind == kindAll {
-			out[key] = map[string]any{"all": toAny(canon)}
+			compiled[key] = map[string]any{"all": toAny(canon)}
 		} else {
-			out[key] = toAny(canon)
+			compiled[key] = toAny(canon)
+		}
+	}
+	return compiled, shown, nil
+}
+
+// KeywordsKey is the car filter of free words, any of which the ad's text
+// must contain ("quattro"). It compiles to a Contains filter on TextAttr.
+const KeywordsKey = "keywords"
+
+// TextAttr is the attr with an ad's full description, from the ad page.
+const TextAttr = "text"
+
+const (
+	maxKeywords   = 10
+	maxKeywordLen = 50
+)
+
+// keywords reads the keywords filter: trimmed, without repeats.
+func keywords(v any) ([]string, error) {
+	names, err := stringList(KeywordsKey, v)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range names {
+		n = strings.Join(strings.Fields(n), " ")
+		switch {
+		case n == "" || seen[fold(n)]:
+			continue
+		case len([]rune(n)) < 2:
+			return nil, fmt.Errorf("keyword %q is too short; use at least 2 letters", n)
+		case len([]rune(n)) > maxKeywordLen:
+			return nil, fmt.Errorf("keyword %q is too long; keep it under %d letters", n, maxKeywordLen)
+		}
+		seen[fold(n)] = true
+		out = append(out, n)
+	}
+	if len(out) > maxKeywords {
+		return nil, fmt.Errorf("at most %d keywords, got %d", maxKeywords, len(out))
+	}
+	return out, nil
+}
+
+// rangeOf reads {min, max}; either may be missing, both must be numbers.
+func rangeOf(f *Field, v any) (map[string]any, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: give a range {min, max}", f.Label)
+	}
+	out := map[string]any{}
+	for k, b := range m {
+		if k != "min" && k != "max" {
+			return nil, fmt.Errorf("%s: a range has only min and max, not %q", f.Label, k)
+		}
+		if b == nil {
+			continue
+		}
+		n, ok := number(b)
+		if !ok {
+			return nil, fmt.Errorf("%s: %s must be a number, got %v", f.Label, k, b)
+		}
+		out[k] = n
+	}
+	if lo, ok := out["min"].(float64); ok {
+		if hi, ok := out["max"].(float64); ok && lo > hi {
+			return nil, fmt.Errorf("%s: min %v is above max %v", f.Label, lo, hi)
 		}
 	}
 	return out, nil
+}
+
+func number(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	}
+	return 0, false
 }
 
 // lookup finds an option, explaining near misses and names that exist in
@@ -222,28 +350,28 @@ func (f *Field) lookup(name string) (Option, error) {
 
 // models checks model names against the chosen makes (or every make when
 // none is chosen). A make without a model list in the codebook accepts any.
-func (cb *Codebook) models(names []string, makes []*Make) ([]string, error) {
+// "Passat*" takes every generation: ss.com lists some models per generation
+// ("Passat (B5)", "Golf 7"). shown keeps the wildcard as written.
+func (cb *Codebook) models(names []string, makes []*Make) (compiled, shown []string, err error) {
 	if len(makes) == 0 {
 		for i := range cb.Makes {
 			makes = append(makes, &cb.Makes[i])
 		}
 	}
-	var out []string
 	for _, n := range names {
-		// "Passat*": ss.com lists some models per generation ("Passat (B5)",
-		// "Golf 7"); a trailing * takes them all.
-		if prefix, ok := strings.CutSuffix(n, "*"); ok {
-			before := len(out)
+		if prefix, ok := strings.CutSuffix(strings.TrimSpace(n), "*"); ok {
+			before := len(compiled)
 			for _, m := range makes {
 				for _, o := range m.Models {
 					if strings.HasPrefix(fold(o.Name), fold(prefix)) {
-						out = append(out, o.Name)
+						compiled = append(compiled, o.Name)
 					}
 				}
 			}
-			if len(out) == before {
-				return nil, fmt.Errorf("no model of the chosen makes starts with %q", prefix)
+			if len(compiled) == before {
+				return nil, nil, fmt.Errorf("no model of the chosen makes starts with %q", prefix)
 			}
+			shown = append(shown, prefix+"*")
 			continue
 		}
 		found, open := false, false
@@ -253,7 +381,7 @@ func (cb *Codebook) models(names []string, makes []*Make) ([]string, error) {
 				open = true
 			}
 			if o, ok := m.Model(n); ok {
-				out, found = append(out, o.Name), true
+				compiled, shown, found = append(compiled, o.Name), append(shown, o.Name), true
 				break
 			}
 			for _, o := range m.Models {
@@ -263,34 +391,33 @@ func (cb *Codebook) models(names []string, makes []*Make) ([]string, error) {
 		switch {
 		case found:
 		case open && len(makes) < len(cb.Makes):
-			out = append(out, n)
+			compiled, shown = append(compiled, n), append(shown, n)
 		default:
-			return nil, fmt.Errorf("unknown model %q for the chosen makes%s", n, didYouMean(n, all))
+			return nil, nil, fmt.Errorf("unknown model %q for the chosen makes%s", n, didYouMean(n, all))
 		}
 	}
-	return out, nil
+	return compiled, shown, nil
 }
 
 // fuels accepts the form's names and the list page's suffixes (D, H, E).
 // Petrol/gas cannot be told from petrol on the list page, so asking for it
-// also accepts plain petrol.
-func fuels(f *Field, names []string) ([]string, error) {
-	var out []string
+// also accepts plain petrol (in compiled, not in shown).
+func fuels(f *Field, names []string) (compiled, shown []string, err error) {
 	for _, n := range names {
 		if canon, ok := fuelSuffix[strings.ToUpper(strings.TrimSpace(n))]; ok && n != "" {
 			n = canon
 		}
 		o, err := f.lookup(n)
 		if err != nil {
-			return nil, fmt.Errorf("filter \"fuel\": %w", err)
+			return nil, nil, fmt.Errorf("%s: %w", f.Label, err)
 		}
-		out = append(out, o.Name)
+		compiled, shown = append(compiled, o.Name), append(shown, o.Name)
 		if o.Name == "Benzīns/gāze" {
-			out = append(out, "Benzīns")
+			compiled = append(compiled, "Benzīns")
 		}
 	}
-	slices.Sort(out)
-	return slices.Compact(out), nil
+	slices.Sort(compiled)
+	return slices.Compact(compiled), shown, nil
 }
 
 // stringList reads a filter value written as one string or a list.
@@ -346,4 +473,17 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// uniq drops repeats, keeping the first occurrence's place.
+func uniq(ss []string) []string {
+	seen := map[string]bool{}
+	out := ss[:0:0]
+	for _, s := range ss {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }

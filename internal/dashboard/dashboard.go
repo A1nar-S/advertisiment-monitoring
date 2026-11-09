@@ -59,7 +59,7 @@ SELECT jsonb_build_object(
     FROM listings ORDER BY first_seen_at DESC, id DESC LIMIT 100
   ) recent), '[]'::jsonb),
   'searches', COALESCE((SELECT jsonb_agg(row_to_json(saved)) FROM (
-    SELECT searches.id, searches.name, users.name AS "userName", searches.source,
+    SELECT searches.id, searches.name, COALESCE(NULLIF(users.display_name, ''), users.name) AS "userName", searches.source,
            searches.enabled, searches.feeds, searches.filters, channels.kind AS channel,
            (SELECT count(*) FROM matches WHERE search_id = searches.id) AS matches
     FROM searches JOIN users ON users.id = searches.user_id

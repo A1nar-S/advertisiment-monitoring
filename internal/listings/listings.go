@@ -149,6 +149,38 @@ func (s *Service) FeedSeen(ctx context.Context, source, feed string) (bool, erro
 	return s.q.FeedSeen(ctx, listingsdb.FeedSeenParams{Source: source, Feed: feed})
 }
 
+// Summary is a stored listing as shown in the dashboard.
+type Summary struct {
+	ExternalID string         `json:"externalId"`
+	Title      string         `json:"title"`
+	URL        string         `json:"url"`
+	Location   string         `json:"location"`
+	Price      string         `json:"price"`
+	ImageURL   string         `json:"imageUrl"`
+	Attrs      map[string]any `json:"attrs"`
+	FirstSeen  time.Time      `json:"firstSeen"`
+	Active     bool           `json:"active"`
+}
+
+// Summaries returns the stored listings among ids, keyed by external ID.
+// Purged ones are simply missing.
+func (s *Service) Summaries(ctx context.Context, source string, ids []string) (map[string]Summary, error) {
+	rows, err := s.q.GetListings(ctx, listingsdb.GetListingsParams{Source: source, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Summary, len(rows))
+	for _, r := range rows {
+		var attrs map[string]any
+		_ = json.Unmarshal(r.Attrs, &attrs)
+		out[r.ExternalID] = Summary{
+			ExternalID: r.ExternalID, Title: r.Title, URL: r.Url, Location: r.Location, Price: r.Price,
+			ImageURL: r.ImageUrl, Attrs: attrs, FirstSeen: r.FirstSeenAt.Time, Active: r.IsActive,
+		}
+	}
+	return out, nil
+}
+
 // Purge deletes listings not seen on any feed for olderThan, and published
 // outbox entries older than a day.
 func (s *Service) Purge(ctx context.Context, olderThan time.Duration) (int64, error) {

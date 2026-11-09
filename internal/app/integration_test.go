@@ -45,7 +45,7 @@ const (
 	seedWindow = 3 * time.Second
 	flatsFeed  = "real-estate/flats/riga/centre/hand_over"
 	cityFeed   = "real-estate/flats/riga/all/hand_over"
-	carsFeed   = "transport/cars/audi/a4"
+	carsFeed   = "transport/cars" // every car search watches the one shared feed
 )
 
 // --- infrastructure ---------------------------------------------------------
@@ -277,39 +277,38 @@ func countListings(t *testing.T, pool *pgxpool.Pool) (n int) {
 	return n
 }
 
-const usersFile = `
-users:
-  - name: alice
-    channels: [{kind: discord, target: alice-chan}]
-    searches:
-      - name: centre rent
-        feeds: [` + flatsFeed + `]
-        filters:
-          price: {max: 700}
-          rooms: {min: 1}
-  - name: bob
-    channels: [{kind: discord, target: bob-chan}]
-    searches:
-      - name: big flats in centre
-        feeds: [` + flatsFeed + `]
-        filters:
-          rooms: {min: 3}
-`
+// addSearch creates a search the way the bot or the dashboard does: a chat
+// user, their alert channel, a category and form-style filters.
+func addSearch(t *testing.T, subs *subscriptions.Service, user, target, name, category string, filters map[string]any) {
+	t.Helper()
+	ctx := context.Background()
+	o, err := subs.PlatformOwner(ctx, "discord", user, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, err := subs.EnsureChannel(ctx, o, "discord", target, "#"+target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := subs.CreateSearch(ctx, o, subscriptions.SearchInput{Name: name, Category: category, ChannelID: ch.ID, Filters: filters}); err != nil {
+		t.Fatalf("search %q: %v", name, err)
+	}
+}
 
-const moreUsers = usersFile + `
-      - name: whole city, cheap
-        feeds: [` + cityFeed + `]
-        filters:
-          price: {max: 450}
-  - name: alice-cars
-    channels: [{kind: discord, target: alice-cars-chan}]
-    searches:
-      - name: a4 2010+
-        feeds: [` + carsFeed + `]
-        filters:
-          year: {min: 2010}
-          price: {max: 8000}
-`
+func searchService(t *testing.T, pool *pgxpool.Pool, reg sources.Registry) *subscriptions.Service {
+	t.Helper()
+	subs := subscriptions.NewService(pool, reg, 3)
+	if err := subs.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return subs
+}
+
+// centre is the flats search area of the district fixture.
+func centre(filters map[string]any) map[string]any {
+	filters["region"], filters["district"], filters["deal"] = "Rīga", "Centrs", "Izīrē"
+	return filters
+}
 
 // --- the test ---------------------------------------------------------------
 
@@ -331,10 +330,11 @@ func TestPipeline(t *testing.T) {
 	reg := sources.NewRegistry(ss.NewClient(5 * time.Second).WithBaseURL(site.srv.URL))
 	common := config.Common{DatabaseURL: in.pgURL, KafkaBrokers: in.brokers, Namespace: fmt.Sprintf("it%d", rand.Uint32())}
 
-	users := filepath.Join(t.TempDir(), "users.yaml")
-	if err := os.WriteFile(users, []byte(usersFile), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	subs := searchService(t, pool, reg)
+	addSearch(t, subs, "alice", "alice-chan", "centre rent", "flats",
+		centre(map[string]any{"price": map[string]any{"max": 700.0}, "rooms": map[string]any{"min": 1.0}}))
+	addSearch(t, subs, "bob", "bob-chan", "big flats in centre", "flats",
+		centre(map[string]any{"rooms": map[string]any{"min": 3.0}}))
 
 	scraperCfg := config.Scraper{
 		Common: common, Source: "ss.com", CrawlInterval: time.Second, RequestGap: 10 * time.Millisecond, MaxPages: 3, FeedCollapseAt: 3,
@@ -346,19 +346,13 @@ func TestPipeline(t *testing.T) {
 		return Ingest(ctx, config.Ingest{Common: common, SeedWindow: seedWindow})
 	})
 	run(t, "matcher", func(ctx context.Context) error {
-		return Matcher(ctx, config.Matcher{Common: common, UsersFile: users, FeedCollapseAt: 3}, reg)
+		return Matcher(ctx, config.Matcher{Common: common, FeedCollapseAt: 3}, reg)
 	})
 	run(t, "notifier", func(ctx context.Context) error {
 		return Notifier(ctx, config.Notifier{Common: common, Delay: 0}, discord)
 	})
 
 	// 1. First start: the feed's current ads are stored, nobody is notified.
-	// The scraper starts last so the matcher has already seeded the searches
-	// the scraper reads its feeds from.
-	eventually(t, 60*time.Second, "matcher to seed searches", func() bool {
-		var n int
-		return pool.QueryRow(ctx, `SELECT count(*) FROM searches`).Scan(&n) == nil && n == 2
-	})
 	stopScraper := startScraper()
 	eventually(t, 60*time.Second, "30 ads prefilled", func() bool { return countListings(t, pool) == 30 })
 	consistently(t, 4*time.Second, "no notifications while prefilling (several scrape cycles)",
@@ -387,13 +381,10 @@ func TestPipeline(t *testing.T) {
 	// 4. New searches are added while running: a city-wide one and a cars one.
 	// Their feeds are new, so their existing ads are prefilled without notifying,
 	// and the city feed replaces the narrower district feed (fewer requests).
-	if err := os.WriteFile(users, []byte(moreUsers), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	subs := subscriptions.NewService(pool, reg, 3)
-	if err := subs.SeedFromFile(ctx, users); err != nil {
-		t.Fatal(err)
-	}
+	addSearch(t, subs, "bob", "bob-chan", "whole city, cheap", "flats",
+		map[string]any{"region": "Rīga", "deal": "Izīrē", "price": map[string]any{"max": 450.0}})
+	addSearch(t, subs, "alice-cars", "alice-cars-chan", "a4 2010+", "cars",
+		map[string]any{"make": "Audi", "model": "A4", "year": map[string]any{"min": 2010.0}, "price": map[string]any{"max": 8000.0}})
 	eventually(t, 60*time.Second, "cars feed prefilled", func() bool { return countListings(t, pool) > 30+25 })
 	time.Sleep(seedWindow + time.Second) // the new feeds' seed windows end
 	consistently(t, 3*time.Second, "new feeds' existing ads did not notify anyone",
@@ -441,28 +432,9 @@ func (f *fakeSS) hitCount(feed string) int {
 
 // --- cars: one shared feed, ad pages only for candidates, restart catch-up --
 
-const allCarsFeed = "transport/cars"
+const allCarsFeed = carsFeed
 
 var moreRe = regexp.MustCompile(`…and (\d+) more`)
-
-const carUsers = `
-users:
-  - name: parents
-    channels: [{kind: discord, target: cars-chan}]
-    searches:
-      # gearbox is only on the ad page: read it for Peugeots only.
-      - name: automatic peugeot
-        feeds: [transport/cars]
-        filters:
-          make: [peugeot]
-          gearbox: automats
-          price: {max: 8000}
-      - name: cheap opel
-        feeds: [transport/cars]
-        filters:
-          make: [Opel]
-          price: {max: 3000}
-`
 
 // layout replaces a feed page's rows with the given IDs: an ID present in
 // the all-cars fixture keeps its row, any other is a copy of like's row.
@@ -513,10 +485,12 @@ func TestCarsPipeline(t *testing.T) {
 
 	reg := sources.NewRegistry(ss.NewClient(5 * time.Second).WithBaseURL(site.srv.URL))
 	common := config.Common{DatabaseURL: in.pgURL, KafkaBrokers: in.brokers, Namespace: fmt.Sprintf("it%d", rand.Uint32())}
-	users := filepath.Join(t.TempDir(), "users.yaml")
-	if err := os.WriteFile(users, []byte(carUsers), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	subs := searchService(t, pool, reg)
+	// gearbox is only on the ad page: read it for Peugeots only.
+	addSearch(t, subs, "parents", "cars-chan", "automatic peugeot", "cars",
+		map[string]any{"make": []any{"peugeot"}, "gearbox": "automats", "price": map[string]any{"max": 8000.0}})
+	addSearch(t, subs, "parents", "cars-chan", "cheap opel", "cars",
+		map[string]any{"make": []any{"Opel"}, "price": map[string]any{"max": 3000.0}})
 	scraperCfg := config.Scraper{
 		Common: common, Source: "ss.com", CrawlInterval: time.Second, RequestGap: 10 * time.Millisecond, MaxPages: 3, FeedCollapseAt: 3,
 	}
@@ -527,7 +501,7 @@ func TestCarsPipeline(t *testing.T) {
 		return Ingest(ctx, config.Ingest{Common: common, SeedWindow: seedWindow})
 	})
 	run(t, "matcher", func(ctx context.Context) error {
-		return Matcher(ctx, config.Matcher{Common: common, UsersFile: users, FeedCollapseAt: 3}, reg)
+		return Matcher(ctx, config.Matcher{Common: common, FeedCollapseAt: 3}, reg)
 	})
 	const window = 6 * time.Second
 	run(t, "notifier", func(ctx context.Context) error {
@@ -535,10 +509,6 @@ func TestCarsPipeline(t *testing.T) {
 	})
 
 	// 1. First start: silent prefill of the one shared feed.
-	eventually(t, 60*time.Second, "matcher to seed searches", func() bool {
-		var n int
-		return pool.QueryRow(ctx, `SELECT count(*) FROM searches`).Scan(&n) == nil && n == 2
-	})
 	stopScraper := startScraper()
 	eventually(t, 60*time.Second, "30 cars prefilled", func() bool { return countListings(t, pool) == 30 })
 	time.Sleep(seedWindow + time.Second)

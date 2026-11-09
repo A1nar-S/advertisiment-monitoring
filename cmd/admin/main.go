@@ -1,8 +1,6 @@
-// Command admin runs one-off maintenance: migrate, seed users, purge old data.
+// Command admin runs one-off maintenance: migrate, purge old data, refresh the ss.com codebooks.
 //
 //	admin migrate
-//	admin seed
-//	admin check          (validate USERS_FILE, no database needed)
 //	admin purge [-older-than 1440h]
 //	admin ss-codebook [-only cars|flats]
 package main
@@ -40,14 +38,11 @@ func run() error {
 	_ = godotenv.Load() // optional
 
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: admin migrate | seed | check | purge [-older-than 1440h] | ss-codebook [-only cars|flats]")
+		return fmt.Errorf("usage: admin migrate | purge [-older-than 1440h] | ss-codebook [-only cars|flats]")
 	}
 	cmd, args := os.Args[1], os.Args[2:]
 	if cmd == "ss-codebook" {
 		return ssCodebook(args) // needs no database
-	}
-	if cmd == "check" {
-		return check() // needs no database
 	}
 
 	cfg, err := config.AdminFromEnv()
@@ -78,13 +73,6 @@ func run() error {
 		slog.Info("migrated")
 		return nil
 
-	case "seed":
-		if err := subs.SeedFromFile(ctx, cfg.UsersFile); err != nil {
-			return err
-		}
-		slog.Info("seeded", "file", cfg.UsersFile)
-		return nil
-
 	case "purge":
 		fs := flag.NewFlagSet("purge", flag.ExitOnError)
 		olderThan := fs.Duration("older-than", cfg.Retention, "delete data not seen for this long")
@@ -103,6 +91,9 @@ func run() error {
 		d, err := notify.PurgeDeliveries(ctx, 2**olderThan)
 		if err != nil {
 			return fmt.Errorf("purge deliveries: %w", err)
+		}
+		if err := subs.PurgeExpiredAuth(ctx); err != nil {
+			return fmt.Errorf("purge logins: %w", err)
 		}
 		slog.Info("purged", "listings", n, "matches", m, "deliveries", d, "older_than", olderThan.Round(time.Second))
 		return nil
@@ -148,18 +139,5 @@ func ssCodebook(args []string) error {
 		}
 		slog.Info("wrote codebook", "file", path, "fields", len(cb.Fields), "makes", len(cb.Makes), "regions", len(cb.Regions))
 	}
-	return nil
-}
-
-// check validates the users file: every search, with "did you mean" hints.
-func check() error {
-	path := os.Getenv("USERS_FILE")
-	if path == "" {
-		path = "config/users.yaml"
-	}
-	if err := subscriptions.ValidateFile(app.KnownSources(0, 0), path); err != nil {
-		return err
-	}
-	slog.Info("users file is valid", "file", path)
 	return nil
 }

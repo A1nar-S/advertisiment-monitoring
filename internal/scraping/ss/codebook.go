@@ -87,6 +87,9 @@ var carFields = []struct {
 	{"year", "Izlaiduma gads", kindRange, fromList, []string{"18"}},
 	{"engine_l", "Motora tilpums, l", kindRange, fromList, []string{"15"}},
 	{"fuel", "Dzinēja tips", kindMulti, fromList, []string{"34"}},
+	// The car feeds have no per-city pages, so the city is read from the ad
+	// page's "Vieta" line. Options are the site's region list (see carRegions).
+	{"region", "Pilsēta, rajons", kindMulti, fromAd, nil},
 	{"gearbox", "Ātrumkārba", kindMulti, fromAd, []string{"35"}},
 	{"mileage_km", "Nobraukums, km", kindRange, fromList, []string{"16"}},
 	{"color", "Krāsa", kindMulti, fromAd, []string{"17"}},
@@ -302,7 +305,12 @@ func (c *Client) BuildCarsCodebook(ctx context.Context, gap time.Duration) (*Cod
 	cb := &Codebook{Category: CarsCategory, Fetched: time.Now().UTC().Format("2006-01-02")}
 	for _, spec := range carFields {
 		f := Field{Key: spec.key, Label: spec.label, OptIDs: spec.ids, Kind: spec.kind, From: spec.from}
-		if spec.kind != kindRange {
+		switch {
+		case spec.key == "region":
+			if f.Options, err = carRegions(); err != nil {
+				return nil, err
+			}
+		case spec.kind != kindRange:
 			f.Options = groupedOptions(spec.ids, options)
 		}
 		cb.Fields = append(cb.Fields, f)
@@ -336,6 +344,23 @@ func (c *Client) BuildCarsCodebook(ctx context.Context, gap time.Duration) (*Cod
 	}
 	cb.index()
 	return cb, nil
+}
+
+// carRegions is ss.com's region list, which the car search form only loads
+// by script. Real estate has the same list as category pages, so it is taken
+// from the flats codebook, minus its "flats abroad" entry.
+func carRegions() ([]Option, error) {
+	flats, err := FlatsCodebook()
+	if err != nil {
+		return nil, err
+	}
+	var out []Option
+	for _, r := range flats.Regions {
+		if r.Slug != "flats-abroad-latvia" {
+			out = append(out, Option{ID: r.Slug, Name: r.Name})
+		}
+	}
+	return out, nil
 }
 
 // groupedOptions merges the options of several form fields. A name that

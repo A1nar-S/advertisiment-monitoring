@@ -36,6 +36,9 @@ type Service struct {
 	q          *subscriptionsdb.Queries
 	sources    sources.Registry
 	collapseAt int
+
+	maxSearches int             // per user; 0 = unlimited
+	admins      map[string]bool // Discord IDs
 }
 
 // NewService. collapseAt is how many sibling feeds a source may merge into

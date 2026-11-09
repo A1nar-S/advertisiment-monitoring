@@ -32,6 +32,16 @@ linters:
             - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/listings, desc: "slices do not import each other"}
             - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/notifications, desc: "slices do not import each other"}
             - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/scraping, desc: "slices do not import each other"}
+        # The bot core knows no chat platform: adapters (bot/discordbot, later
+        # telegram) do. It reaches data through the subscriptions Service, and
+        # stored ads through its own Ads interface (wired in internal/app).
+        bot-core-is-platform-neutral:
+          files: ["**/internal/bot/*.go", "!$test"]
+          deny:
+            - {pkg: github.com/bwmarrin/discordgo, desc: "platform code belongs in an adapter (internal/bot/discordbot)"}
+            - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/scraping, desc: "use the source's catalog via subscriptions"}
+            - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/listings, desc: "use bot.Ads, wired in internal/app"}
+            - {pkg: github.com/A1nar-S/advertisiment-monitoring/internal/notifications, desc: "the bot only manages searches"}
         notifications-is-standalone:
           files: ["**/internal/notifications/**"]
           deny:

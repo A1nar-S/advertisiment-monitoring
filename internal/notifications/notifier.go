@@ -38,6 +38,11 @@ type Notifier interface {
 	NotifyText(ctx context.Context, target, msg string) error
 }
 
+// ErrUndeliverable is returned (wrapped) by a Notifier when retrying cannot
+// help: the user closed their DMs, the channel is gone. Such a message is
+// dropped, not retried.
+var ErrUndeliverable = errors.New("undeliverable")
+
 // Service routes notification requests to the right Notifier exactly once per key.
 type Service struct {
 	pool      *pgxpool.Pool
@@ -120,6 +125,10 @@ func (s *Service) Handle(ctx context.Context, req events.NotificationRequested) 
 		err = n.NotifyListing(ctx, req.Channel.Target, *req.Listing)
 	} else {
 		err = n.NotifyText(ctx, req.Channel.Target, req.Text)
+	}
+	if errors.Is(err, ErrUndeliverable) {
+		slog.Warn("undeliverable, dropped", "target", req.Channel.Target, "search", req.SearchName, "err", err)
+		return nil // keep the claim: a retry would fail the same way
 	}
 	if err != nil {
 		s.release(ctx, req.Key)
@@ -216,7 +225,10 @@ func (s *Service) FlushDigests(ctx context.Context) (int, error) {
 				ls = append(ls, l)
 			}
 			for _, msg := range digestMessages(d.SearchName, ls, s.burst, s.burstWindow) {
-				if err := n.NotifyText(ctx, d.ChannelTarget, msg); err != nil {
+				if err := n.NotifyText(ctx, d.ChannelTarget, msg); errors.Is(err, ErrUndeliverable) {
+					slog.Warn("digest undeliverable, dropped", "target", d.ChannelTarget, "err", err)
+					return nil // commits the delete
+				} else if err != nil {
 					return fmt.Errorf("%s: %w", n.Kind(), err) // rolls back: stays queued
 				}
 				s.pause(ctx)

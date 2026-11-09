@@ -45,7 +45,33 @@ event-driven direction is the one we are building towards.
 ## Architecture (built)
 ```
 scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matcher --notifications.requested--> notifier
+bot (Discord) ─┐
+dashboard api ─┴─> subscriptions (users, channels, searches, logins) <── read live by scraper and matcher
 ```
+- **Self-service, no config file.** People manage their own searches with the chat bot or the dashboard; there is no
+  users file. Both go through one write path, `subscriptions.Service` (`CreateSearch`/`UpdateSearch`/`SaveSearchByName`,
+  `SetEnabled`, `DeleteSearch`), which compiles the search through the source's `sources.Catalog` (validation, "did you
+  mean") and the filter parser. A search is a **category** (`cars`, `flats`) plus form-style filters; users never see feeds.
+  `searches.spec` keeps what the user wrote (for editing), `feeds`/`filters` what the pipeline runs on. The scraper and
+  matcher read the table every cycle/ad, so changes apply without restarts. Per-user limit `MAX_SEARCHES_PER_USER`;
+  `ADMIN_USERS` (`platform:id`) see and edit everyone's. Another user's search is "not found".
+- **Identity:** a chat account, `users(platform, external_id)`; channels are `(user, kind=platform, target)` with a label.
+  The channel kind is the notifier kind, so alerts for a Telegram user would go through a Telegram notifier.
+- **Bot** (`internal/bot`): platform-neutral core (commands as specs, `Run`/`Complete`/`Act`, replies with neutral menus)
+  behind a `Messenger` interface; `internal/bot/discordbot` is the Discord adapter (slash commands, autocomplete from the
+  codebooks, select menus; gateway connection, so it works behind NAT). Depguard keeps discordgo out of the core. A
+  Telegram adapter would implement `Messenger` and map the same specs to `/watch cars make=… price_max=…` and inline
+  keyboards. Commands: `/watch cars|flats`, `/edit cars|flats` (merges the given filters into the search; `clear:`
+  removes filters, bounds, whole ranges or the channel). Car searches take `keywords` (any of the words in the ad text:
+  the list snippet first, the ad page's description only if needed; `Filters.Contains` on the `text` attr), `/searches`, `/matches`, `/unwatch`, `/dashboard`. Users can
+  manage their own searches fully from the bot; the dashboard is optional. `channel:` is accepted only where the user may
+  post (View + Send Messages, Manage Channels or Administrator): the adapter works it out from the gateway's cached roles
+  and overrides and passes it as `Call.Postable`. `/setup` (status channel, stored in the `settings` table and read by
+  the scraper per status message; `ADMIN_CHANNEL_ID` is the fallback) is shown to Manage Server members only and needs a
+  bot admin: `ADMIN_USERS` plus the Discord app's owner or team, read at start. Alerts go by DM unless `channel:` is given; closed DMs get a warning, and the notifier drops "cannot DM"/"unknown channel" errors instead of retrying.
+- **Dashboard login:** `/dashboard` replies with a one-time link (`PUBLIC_URL/api/login?token=…`, 10 minutes, single use)
+  that becomes a 30-day HttpOnly SameSite=Lax session cookie. Only SHA-256 hashes of tokens are stored. Changes need an
+  `X-Requested-With` header (CSRF). No OAuth app to set up.
 - **Sources are plugins** (`internal/sources.Source`): `FetchFeed`, `PlanFeeds` (merge feeds to cut requests),
   `InScope` (does an ad belong to a search's feeds). `internal/events.ListingDiscovered` is source-neutral: common
   fields plus `Attrs` (filterable facts) and `Fields` (what to display). Register a new site in `internal/app/sources.go`.
@@ -55,18 +81,18 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
   row; unknown layout = error, not guesswork). New category = new entries in `columns`.
 - **Codebooks** (`internal/scraping/ss/codebook/{cars,flats}.json`, embedded): ss.com's own search-form vocabulary
   (field IDs, option names, makes→models, regions→districts with URL slugs). Searches are written in these names and
-  validated at seed time (`sources.SearchNormalizer`: unknown names fail with "did you mean"). Parsed attrs use the same
-  names, and ad pages are read through the same field IDs (`td#tdo_<id>`). A checked-in snapshot rather than a DB table:
-  versioned, offline, reviewable diffs. Refresh with `go run ./cmd/admin ss-codebook` (~85 requests). A DB table becomes
-  worthwhile when the dashboard edits searches.
-- **Cars = one shared feed.** Every car search uses `feeds: [transport/cars]` (~1000 new ads/day, about 3.5 per 5 min), so one
+  validated on save (`sources.Catalog.CompileSearch`: unknown names fail with "did you mean"). Parsed attrs use the
+  same names, and ad pages are read through the same field IDs (`td#tdo_<id>`). `Catalog.Categories()` serves them to
+  the bot's autocomplete and the dashboard's forms. A checked-in snapshot rather than a DB table: versioned, offline,
+  reviewable diffs. Refresh with `go run ./cmd/admin ss-codebook` (~85 requests), then rebuild.
+- **Cars = one shared feed.** Every car search watches `transport/cars` (~1000 new ads/day, about 3.5 per 5 min), so one
   request per cycle serves all users. Filters on list columns are free (make, model, year, engine, fuel, mileage, price).
   Ad-page-only fields (gearbox, body, color, inspection, equipment; flats: house type) are read **lazily by the matcher**
   (`sources.Enricher`): only for a new ad that passes every cheap filter of some search, at most once per ad, shared by all
   searches. If the ad page fails, candidates get the alert flagged "⚠️ Unconfirmed" rather than nothing; a removed ad
   matches nothing. ss.com's own server search was rejected: it is POST + session, 2 requests per search per cycle.
-- **Flats:** `feeds: [real-estate/flats]` + `region`/`district`/`deal` compile into feed paths (shared by everyone watching
-  the area); the rest are local filters. Full feed paths still work as before.
+- **Flats:** `region`/`district`/`deal` compile into feed paths (shared by everyone watching the area); the rest are local
+  filters.
   Persisted source health and admin failure/recovery alerts are not implemented yet; they are
   a required foundation in [ROADMAP.md](ROADMAP.md#monitoring-required-for-scraping).
 - **Scrape budget and paging:** feeds are derived from users' searches, de-duplicated, and >`FEED_COLLAPSE_AT` siblings
@@ -87,15 +113,16 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
 - **Lifecycle:** `make purge` / `go run ./cmd/admin purge` deletes listings not *seen* for `RETENTION_HOURS` (default 60
   days). The listings table doubles as the "already announced" memory: a shorter retention re-announces old ads when they
   are bumped. Matches/deliveries are kept 2x longer. Cron it weekly.
-- **Services:** `cmd/{scraper,ingest,matcher,notifier,admin}` are thin; wiring lives in `internal/app` so tests run the real thing.
-- **Dashboard:** `web/` is a Vue 3 + TypeScript SPA using Bun and Vite. `cmd/api` serves a read-only
-  `GET /api/overview` endpoint on `127.0.0.1:8080`; `internal/dashboard` owns its cross-slice reporting queries.
-  Vite proxies API requests. No authentication yet: local access only. See README for startup commands.
-  The listings view has an All / Cars / Flats filter over the latest 100 loaded records. For now it derives
-  categories from ss.com category paths in `location`; unrecognized categories remain visible under All.
+- **Services:** `cmd/{scraper,ingest,matcher,notifier,bot,api,admin}` are thin; wiring lives in `internal/app` so tests
+  run the real thing.
+- **Dashboard:** `web/` is a Vue 3 + TypeScript SPA (Bun, Vite), built into every image and served by `cmd/api`
+  (`internal/web`: API + SPA). Tabs: your searches (editor generated from `/api/categories`), your alerts, and for
+  admins the old read-only overview (`internal/dashboard`'s cross-slice queries). Compose binds it to `127.0.0.1:8080`;
+  publish it through a tunnel and set `PUBLIC_URL` for others. `cd web && bun run dev` proxies `/api` to a local API.
 
 ## Testing
-- `go test ./...` unit tests; slice tests need `TEST_DATABASE_URL` (skipped otherwise).
+- `go test ./...` unit tests; slice tests need `TEST_DATABASE_URL` (skipped otherwise). The bot core is tested with a
+  fake `Messenger`, the Discord adapter's translation on its own, the web API with `httptest`.
 - `go test -tags integration ./internal/app` runs scraper+ingest+matcher+notifier against real Postgres and Kafka
   (testcontainers, needs Docker) with a fake ss.com and fake Discord. It covers silent prefill, exactly-once
   notification, scraper restart, a new feed added while running, feed collapsing, and flats + cars. `TestCarsPipeline`
@@ -112,18 +139,18 @@ scraper --listings.discovered--> ingest (upsert + outbox) --listings.new--> matc
   `bun run format`; Prettier is pinned in the frontend development dependencies.
 
 ## Not verified
-- Discord delivery against a real token and channel (the notifier is tested with a fake). The full Docker stack
-  (`make up`) was run end to end up to the notifier on 2026-11-08; the notifier waits for a real `DISCORD_BOT_TOKEN`.
-- Telegram does not exist yet; it is one more `Notifier`.
+- Anything against a real Discord token: delivery, slash-command registration, autocomplete, select menus. The full
+  Docker stack was run on 2026-11-08: dashboard login, search create/validate and the overview's admin check worked end to
+  end; the bot and the notifier wait for a real `DISCORD_BOT_TOKEN`.
+- Telegram does not exist yet: one more `Notifier` plus a bot adapter implementing `bot.Messenger`.
 
 ## Running it
-See the README ("Run it"). In short:
+See the README. In short:
 ```sh
-make env && make users          # .env (random DB password) and config/users.yaml; then fill in Discord values
-make check-users                # validate searches against the codebooks
-make up                         # Postgres, Kafka, topics, scraper, ingest, matcher, notifier (all in Docker)
-make logs | make reload-users | make purge | make down
-# Services on the host instead: make infra, then go run ./cmd/ingest & ./cmd/matcher & ./cmd/notifier & ./cmd/scraper
+make env                        # .env (random DB password); then the Discord values
+make up                         # Postgres, Kafka, scraper, ingest, matcher, notifier, bot, dashboard (all in Docker)
+make logs | make purge | make down
+# Services on the host instead: make infra, then go run ./cmd/<service>; the dashboard with cd web && bun run dev
 go run ./cmd/admin ss-codebook  # refresh the ss.com codebooks
 go generate ./...               # after changing a slice's migrations/ or queries/
 ```

@@ -482,6 +482,131 @@
       ]
     },
     {
+      "key": "region",
+      "label": "Pilsēta, rajons",
+      "opt_ids": null,
+      "kind": "multi",
+      "from": "ad",
+      "options": [
+        {
+          "id": "riga",
+          "name": "Rīga"
+        },
+        {
+          "id": "jurmala",
+          "name": "Jūrmala"
+        },
+        {
+          "id": "riga-region",
+          "name": "Rīgas rajons"
+        },
+        {
+          "id": "aizkraukle-and-reg",
+          "name": "Aizkraukle un rajons"
+        },
+        {
+          "id": "aluksne-and-reg",
+          "name": "Alūksne un rajons"
+        },
+        {
+          "id": "balvi-and-reg",
+          "name": "Balvi un rajons"
+        },
+        {
+          "id": "bauska-and-reg",
+          "name": "Bauska un rajons"
+        },
+        {
+          "id": "cesis-and-reg",
+          "name": "Cēsis un rajons"
+        },
+        {
+          "id": "daugavpils-and-reg",
+          "name": "Daugavpils un rajons"
+        },
+        {
+          "id": "dobele-and-reg",
+          "name": "Dobele un rajons"
+        },
+        {
+          "id": "gulbene-and-reg",
+          "name": "Gulbene un rajons"
+        },
+        {
+          "id": "jekabpils-and-reg",
+          "name": "Jēkabpils un rajons"
+        },
+        {
+          "id": "jelgava-and-reg",
+          "name": "Jelgava un rajons"
+        },
+        {
+          "id": "kraslava-and-reg",
+          "name": "Krāslava un rajons"
+        },
+        {
+          "id": "kuldiga-and-reg",
+          "name": "Kuldīga un rajons"
+        },
+        {
+          "id": "liepaja-and-reg",
+          "name": "Liepāja un rajons"
+        },
+        {
+          "id": "limbadzi-and-reg",
+          "name": "Limbaži un rajons"
+        },
+        {
+          "id": "ludza-and-reg",
+          "name": "Ludza un rajons"
+        },
+        {
+          "id": "madona-and-reg",
+          "name": "Madona un rajons"
+        },
+        {
+          "id": "ogre-and-reg",
+          "name": "Ogre un rajons"
+        },
+        {
+          "id": "preili-and-reg",
+          "name": "Preiļi un rajons"
+        },
+        {
+          "id": "rezekne-and-reg",
+          "name": "Rēzekne un rajons"
+        },
+        {
+          "id": "saldus-and-reg",
+          "name": "Saldus un rajons"
+        },
+        {
+          "id": "talsi-and-reg",
+          "name": "Talsi un rajons"
+        },
+        {
+          "id": "tukums-and-reg",
+          "name": "Tukums un rajons"
+        },
+        {
+          "id": "valka-and-reg",
+          "name": "Valka un rajons"
+        },
+        {
+          "id": "valmiera-and-reg",
+          "name": "Valmiera un rajons"
+        },
+        {
+          "id": "ventspils-and-reg",
+          "name": "Ventspils un rajons"
+        },
+        {
+          "id": "other",
+          "name": "Cits"
+        }
+      ]
+    },
+    {
       "key": "gearbox",
       "label": "Ātrumkārba",
       "opt_ids": [

@@ -7,7 +7,276 @@ package subscriptionsdb
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const consumeLoginToken = `-- name: ConsumeLoginToken :one
+DELETE FROM login_tokens WHERE token_hash = $1 AND expires_at > now() RETURNING user_id
+`
+
+// Single use: the row is gone once read.
+func (q *Queries) ConsumeLoginToken(ctx context.Context, tokenHash string) (int64, error) {
+	row := q.db.QueryRow(ctx, consumeLoginToken, tokenHash)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const countUserSearches = `-- name: CountUserSearches :one
+SELECT count(*) FROM searches WHERE user_id = $1
+`
+
+func (q *Queries) CountUserSearches(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserSearches, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteSearch = `-- name: DeleteSearch :execrows
+DELETE FROM searches WHERE id = $1
+`
+
+func (q *Queries) DeleteSearch(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSearch, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions WHERE token_hash = $1
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := q.db.Exec(ctx, deleteSession, tokenHash)
+	return err
+}
+
+const getSearchIDByName = `-- name: GetSearchIDByName :one
+SELECT id FROM searches WHERE user_id = $1 AND name = $2
+`
+
+type GetSearchIDByNameParams struct {
+	UserID int64
+	Name   string
+}
+
+func (q *Queries) GetSearchIDByName(ctx context.Context, arg GetSearchIDByNameParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getSearchIDByName, arg.UserID, arg.Name)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getSearchOwner = `-- name: GetSearchOwner :one
+SELECT user_id FROM searches WHERE id = $1
+`
+
+func (q *Queries) GetSearchOwner(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getSearchOwner, id)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const getSearchView = `-- name: GetSearchView :one
+SELECT s.id, s.user_id, u.display_name AS user_name, s.name, s.enabled, s.source, s.feeds, s.spec,
+       s.channel_id, c.kind AS channel_kind, c.target AS channel_target, c.label AS channel_label, s.created_at, s.updated_at,
+       (SELECT count(*) FROM matches m WHERE m.search_id = s.id) AS matches
+FROM searches s
+JOIN users u ON u.id = s.user_id
+JOIN channels c ON c.id = s.channel_id
+WHERE s.id = $1
+`
+
+type GetSearchViewRow struct {
+	ID            int64
+	UserID        int64
+	UserName      string
+	Name          string
+	Enabled       bool
+	Source        string
+	Feeds         []string
+	Spec          []byte
+	ChannelID     int64
+	ChannelKind   string
+	ChannelTarget string
+	ChannelLabel  string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	Matches       int64
+}
+
+func (q *Queries) GetSearchView(ctx context.Context, id int64) (GetSearchViewRow, error) {
+	row := q.db.QueryRow(ctx, getSearchView, id)
+	var i GetSearchViewRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.UserName,
+		&i.Name,
+		&i.Enabled,
+		&i.Source,
+		&i.Feeds,
+		&i.Spec,
+		&i.ChannelID,
+		&i.ChannelKind,
+		&i.ChannelTarget,
+		&i.ChannelLabel,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Matches,
+	)
+	return i, err
+}
+
+const getSessionUser = `-- name: GetSessionUser :one
+SELECT u.id, COALESCE(u.platform, '')::text AS platform, COALESCE(u.external_id, '')::text AS external_id, u.display_name
+FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE s.token_hash = $1 AND s.expires_at > now()
+`
+
+type GetSessionUserRow struct {
+	ID          int64
+	Platform    string
+	ExternalID  string
+	DisplayName string
+}
+
+func (q *Queries) GetSessionUser(ctx context.Context, tokenHash string) (GetSessionUserRow, error) {
+	row := q.db.QueryRow(ctx, getSessionUser, tokenHash)
+	var i GetSessionUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.ExternalID,
+		&i.DisplayName,
+	)
+	return i, err
+}
+
+const getSetting = `-- name: GetSetting :one
+SELECT value FROM settings WHERE key = $1
+`
+
+func (q *Queries) GetSetting(ctx context.Context, key string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getSetting, key)
+	var value []byte
+	err := row.Scan(&value)
+	return value, err
+}
+
+const getUser = `-- name: GetUser :one
+SELECT id, COALESCE(platform, '')::text AS platform, COALESCE(external_id, '')::text AS external_id, display_name
+FROM users WHERE id = $1
+`
+
+type GetUserRow struct {
+	ID          int64
+	Platform    string
+	ExternalID  string
+	DisplayName string
+}
+
+func (q *Queries) GetUser(ctx context.Context, id int64) (GetUserRow, error) {
+	row := q.db.QueryRow(ctx, getUser, id)
+	var i GetUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.ExternalID,
+		&i.DisplayName,
+	)
+	return i, err
+}
+
+const getUserChannel = `-- name: GetUserChannel :one
+SELECT id, kind, target FROM channels WHERE id = $1 AND user_id = $2
+`
+
+type GetUserChannelParams struct {
+	ID     int64
+	UserID int64
+}
+
+type GetUserChannelRow struct {
+	ID     int64
+	Kind   string
+	Target string
+}
+
+func (q *Queries) GetUserChannel(ctx context.Context, arg GetUserChannelParams) (GetUserChannelRow, error) {
+	row := q.db.QueryRow(ctx, getUserChannel, arg.ID, arg.UserID)
+	var i GetUserChannelRow
+	err := row.Scan(&i.ID, &i.Kind, &i.Target)
+	return i, err
+}
+
+const insertLoginToken = `-- name: InsertLoginToken :exec
+INSERT INTO login_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)
+`
+
+type InsertLoginTokenParams struct {
+	TokenHash string
+	UserID    int64
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertLoginToken(ctx context.Context, arg InsertLoginTokenParams) error {
+	_, err := q.db.Exec(ctx, insertLoginToken, arg.TokenHash, arg.UserID, arg.ExpiresAt)
+	return err
+}
+
+const insertSearch = `-- name: InsertSearch :one
+INSERT INTO searches (user_id, channel_id, name, enabled, source, feeds, filters, spec, origin)
+VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8)
+RETURNING id
+`
+
+type InsertSearchParams struct {
+	UserID    int64
+	ChannelID int64
+	Name      string
+	Source    string
+	Feeds     []string
+	Filters   []byte
+	Spec      []byte
+	Origin    string
+}
+
+func (q *Queries) InsertSearch(ctx context.Context, arg InsertSearchParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertSearch,
+		arg.UserID,
+		arg.ChannelID,
+		arg.Name,
+		arg.Source,
+		arg.Feeds,
+		arg.Filters,
+		arg.Spec,
+		arg.Origin,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertSession = `-- name: InsertSession :exec
+INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)
+`
+
+type InsertSessionParams struct {
+	TokenHash string
+	UserID    int64
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
+	_, err := q.db.Exec(ctx, insertSession, arg.TokenHash, arg.UserID, arg.ExpiresAt)
+	return err
+}
 
 const listEnabledFeeds = `-- name: ListEnabledFeeds :many
 SELECT DISTINCT unnest(feeds)::text AS feed FROM searches WHERE enabled AND source = $1
@@ -110,6 +379,172 @@ func (q *Queries) ListMatchedSearchIDs(ctx context.Context, arg ListMatchedSearc
 	return items, nil
 }
 
+const listSearchViews = `-- name: ListSearchViews :many
+SELECT s.id, s.user_id, u.display_name AS user_name, s.name, s.enabled, s.source, s.feeds, s.spec,
+       s.channel_id, c.kind AS channel_kind, c.target AS channel_target, c.label AS channel_label, s.created_at, s.updated_at,
+       (SELECT count(*) FROM matches m WHERE m.search_id = s.id) AS matches
+FROM searches s
+JOIN users u ON u.id = s.user_id
+JOIN channels c ON c.id = s.channel_id
+WHERE $1::boolean OR s.user_id = $2
+ORDER BY s.created_at DESC, s.id DESC
+`
+
+type ListSearchViewsParams struct {
+	Everyone bool
+	UserID   int64
+}
+
+type ListSearchViewsRow struct {
+	ID            int64
+	UserID        int64
+	UserName      string
+	Name          string
+	Enabled       bool
+	Source        string
+	Feeds         []string
+	Spec          []byte
+	ChannelID     int64
+	ChannelKind   string
+	ChannelTarget string
+	ChannelLabel  string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	Matches       int64
+}
+
+// A user's searches, or everyone's for admins.
+func (q *Queries) ListSearchViews(ctx context.Context, arg ListSearchViewsParams) ([]ListSearchViewsRow, error) {
+	rows, err := q.db.Query(ctx, listSearchViews, arg.Everyone, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSearchViewsRow
+	for rows.Next() {
+		var i ListSearchViewsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.UserName,
+			&i.Name,
+			&i.Enabled,
+			&i.Source,
+			&i.Feeds,
+			&i.Spec,
+			&i.ChannelID,
+			&i.ChannelKind,
+			&i.ChannelTarget,
+			&i.ChannelLabel,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Matches,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserChannels = `-- name: ListUserChannels :many
+SELECT id, kind, target, label FROM channels WHERE user_id = $1 ORDER BY id
+`
+
+type ListUserChannelsRow struct {
+	ID     int64
+	Kind   string
+	Target string
+	Label  string
+}
+
+func (q *Queries) ListUserChannels(ctx context.Context, userID int64) ([]ListUserChannelsRow, error) {
+	rows, err := q.db.Query(ctx, listUserChannels, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserChannelsRow
+	for rows.Next() {
+		var i ListUserChannelsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Target,
+			&i.Label,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserMatches = `-- name: ListUserMatches :many
+SELECT m.search_id, s.name AS search_name, m.source, m.external_id, m.created_at
+FROM matches m JOIN searches s ON s.id = m.search_id
+WHERE s.user_id = $1
+  AND ($2::bigint IS NULL OR m.search_id = $2)
+ORDER BY m.created_at DESC
+LIMIT $3
+`
+
+type ListUserMatchesParams struct {
+	UserID   int64
+	SearchID *int64
+	MaxRows  int32
+}
+
+type ListUserMatchesRow struct {
+	SearchID   int64
+	SearchName string
+	Source     string
+	ExternalID string
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ListUserMatches(ctx context.Context, arg ListUserMatchesParams) ([]ListUserMatchesRow, error) {
+	rows, err := q.db.Query(ctx, listUserMatches, arg.UserID, arg.SearchID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserMatchesRow
+	for rows.Next() {
+		var i ListUserMatchesRow
+		if err := rows.Scan(
+			&i.SearchID,
+			&i.SearchName,
+			&i.Source,
+			&i.ExternalID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const purgeExpiredAuth = `-- name: PurgeExpiredAuth :exec
+WITH t AS (DELETE FROM login_tokens WHERE expires_at < now())
+DELETE FROM sessions WHERE expires_at < now()
+`
+
+func (q *Queries) PurgeExpiredAuth(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, purgeExpiredAuth)
+	return err
+}
+
 const purgeMatches = `-- name: PurgeMatches :execrows
 DELETE FROM matches WHERE created_at < now() - make_interval(secs => $1::float8)
 `
@@ -138,9 +573,74 @@ func (q *Queries) RecordMatch(ctx context.Context, arg RecordMatchParams) error 
 	return err
 }
 
+const setSearchEnabled = `-- name: SetSearchEnabled :execrows
+UPDATE searches SET enabled = $1, updated_at = now() WHERE id = $2
+`
+
+type SetSearchEnabledParams struct {
+	Enabled bool
+	ID      int64
+}
+
+func (q *Queries) SetSearchEnabled(ctx context.Context, arg SetSearchEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSearchEnabled, arg.Enabled, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setSetting = `-- name: SetSetting :exec
+INSERT INTO settings (key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+`
+
+type SetSettingParams struct {
+	Key   string
+	Value []byte
+}
+
+func (q *Queries) SetSetting(ctx context.Context, arg SetSettingParams) error {
+	_, err := q.db.Exec(ctx, setSetting, arg.Key, arg.Value)
+	return err
+}
+
+const updateSearch = `-- name: UpdateSearch :execrows
+UPDATE searches SET
+    channel_id = $1, name = $2, source = $3, feeds = $4,
+    filters = $5, spec = $6, updated_at = now()
+WHERE id = $7
+`
+
+type UpdateSearchParams struct {
+	ChannelID int64
+	Name      string
+	Source    string
+	Feeds     []string
+	Filters   []byte
+	Spec      []byte
+	ID        int64
+}
+
+func (q *Queries) UpdateSearch(ctx context.Context, arg UpdateSearchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSearch,
+		arg.ChannelID,
+		arg.Name,
+		arg.Source,
+		arg.Feeds,
+		arg.Filters,
+		arg.Spec,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertChannel = `-- name: UpsertChannel :one
-INSERT INTO channels (user_id, kind, target) VALUES ($1, $2, $3)
-ON CONFLICT (user_id, kind) DO UPDATE SET target = EXCLUDED.target
+INSERT INTO channels (user_id, kind, target, label) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, kind, target) DO UPDATE SET label = CASE WHEN EXCLUDED.label = '' THEN channels.label ELSE EXCLUDED.label END
 RETURNING id
 `
 
@@ -148,58 +648,38 @@ type UpsertChannelParams struct {
 	UserID int64
 	Kind   string
 	Target string
+	Label  string
 }
 
 func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) (int64, error) {
-	row := q.db.QueryRow(ctx, upsertChannel, arg.UserID, arg.Kind, arg.Target)
+	row := q.db.QueryRow(ctx, upsertChannel,
+		arg.UserID,
+		arg.Kind,
+		arg.Target,
+		arg.Label,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
 }
 
-const upsertSearch = `-- name: UpsertSearch :exec
-INSERT INTO searches (user_id, channel_id, name, enabled, source, feeds, filters)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (user_id, name) DO UPDATE SET
-    channel_id = EXCLUDED.channel_id,
-    enabled    = EXCLUDED.enabled,
-    source     = EXCLUDED.source,
-    feeds      = EXCLUDED.feeds,
-    filters    = EXCLUDED.filters
-`
-
-type UpsertSearchParams struct {
-	UserID    int64
-	ChannelID int64
-	Name      string
-	Enabled   bool
-	Source    string
-	Feeds     []string
-	Filters   []byte
-}
-
-// created_at is left alone on update: it marks when the user started watching.
-func (q *Queries) UpsertSearch(ctx context.Context, arg UpsertSearchParams) error {
-	_, err := q.db.Exec(ctx, upsertSearch,
-		arg.UserID,
-		arg.ChannelID,
-		arg.Name,
-		arg.Enabled,
-		arg.Source,
-		arg.Feeds,
-		arg.Filters,
-	)
-	return err
-}
-
-const upsertUser = `-- name: UpsertUser :one
-INSERT INTO users (name) VALUES ($1)
-ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+const upsertPlatformUser = `-- name: UpsertPlatformUser :one
+INSERT INTO users (name, platform, external_id, display_name)
+VALUES ($1::text || ':' || $2::text, $1::text, $2::text, $3)
+ON CONFLICT (platform, external_id) DO UPDATE SET display_name = EXCLUDED.display_name
 RETURNING id
 `
 
-func (q *Queries) UpsertUser(ctx context.Context, name string) (int64, error) {
-	row := q.db.QueryRow(ctx, upsertUser, name)
+type UpsertPlatformUserParams struct {
+	Platform    string
+	ExternalID  string
+	DisplayName string
+}
+
+// A chat account (platform + its user ID) is the identity; the display name
+// follows the platform.
+func (q *Queries) UpsertPlatformUser(ctx context.Context, arg UpsertPlatformUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertPlatformUser, arg.Platform, arg.ExternalID, arg.DisplayName)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

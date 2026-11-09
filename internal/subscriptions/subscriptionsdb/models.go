@@ -13,6 +13,13 @@ type Channel struct {
 	UserID int64
 	Kind   string
 	Target string
+	Label  string
+}
+
+type LoginToken struct {
+	TokenHash string
+	UserID    int64
+	ExpiresAt pgtype.Timestamptz
 }
 
 type Match struct {
@@ -32,9 +39,27 @@ type Search struct {
 	Feeds     []string
 	Filters   []byte
 	CreatedAt pgtype.Timestamptz
+	Spec      []byte
+	Origin    string
+	UpdatedAt pgtype.Timestamptz
+}
+
+type Session struct {
+	TokenHash string
+	UserID    int64
+	ExpiresAt pgtype.Timestamptz
+}
+
+type Setting struct {
+	Key       string
+	Value     []byte
+	UpdatedAt pgtype.Timestamptz
 }
 
 type User struct {
-	ID   int64
-	Name string
+	ID          int64
+	Name        string
+	Platform    *string
+	ExternalID  *string
+	DisplayName string
 }

@@ -18,10 +18,10 @@ import (
 )
 
 // EnrichableKeys implements sources.Enricher: the facts only the ad page has
-// (cars: gearbox, body, ...; flats: house type), plus a car's fuel, which the
-// list page sometimes omits ("-" engine).
+// (cars: gearbox, body, ..., the full description; flats: house type), plus
+// a car's fuel, which the list page sometimes omits ("-" engine).
 func (*Client) EnrichableKeys() []string {
-	keys := []string{"fuel"}
+	keys := []string{"fuel", TextAttr}
 	for _, load := range []func() (*Codebook, error){CarsCodebook, FlatsCodebook} {
 		if cb, err := load(); err == nil {
 			keys = append(keys, cb.AdKeys()...)
@@ -139,8 +139,15 @@ func parseAdPage(cb *Codebook, r io.Reader) (map[string]any, error) {
 			set("inspection", o, ok)
 		}
 	}
+	if f, ok := cb.Field("region"); ok {
+		o, ok := regionOption(f, contact(doc, "Vieta:"))
+		set("region", o, ok)
+	}
 	if n, err := strconv.Atoi(strings.Fields(cell("1716") + " x")[0]); err == nil {
 		attrs["seats"] = float64(n)
+	}
+	if d := description(doc); d != "" {
+		attrs[TextAttr] = d
 	}
 
 	if f, ok := cb.Field("equipment"); ok {
@@ -165,11 +172,52 @@ func parseAdPage(cb *Codebook, r io.Reader) (map[string]any, error) {
 	return attrs, nil
 }
 
+// maxText caps the description kept for keyword search.
+const maxText = 4000
+
+// description is the ad's own text: what #msg_div_msg holds before the
+// options table.
+func description(doc *goquery.Document) string {
+	msg := doc.Find("div#msg_div_msg").First().Clone()
+	msg.Find("table, div, script").Remove()
+	d := strings.Join(strings.Fields(msg.Text()), " ")
+	if r := []rune(d); len(r) > maxText {
+		d = string(r[:maxText])
+	}
+	return d
+}
+
+// contact reads a line of the ad's contact block, e.g. "Vieta:" → "Rīga".
+func contact(doc *goquery.Document, label string) string {
+	var v string
+	doc.Find("td.ads_contacts_name").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		if text(s) != label {
+			return true
+		}
+		v = text(s.Next())
+		return false
+	})
+	return v
+}
+
+var rajAbbrev = regexp.MustCompile(`(?i)\braj\.?$`)
+
+// regionOption maps an ad's "Vieta" to a region: car ads abbreviate the
+// list's "Jelgava un rajons" to "Jelgava un raj.".
+func regionOption(f *Field, v string) (Option, bool) {
+	v, _, _ = strings.Cut(v, ",")
+	v = rajAbbrev.ReplaceAllString(strings.TrimSpace(v), "rajons")
+	if v == "" {
+		return Option{}, false
+	}
+	return f.Option(v)
+}
+
 // adFields are the ad-page facts worth showing in a notification.
 func adFields(l events.ListingDiscovered) []events.Field {
 	var fs []events.Field
 	for _, f := range []struct{ key, name string }{
-		{"gearbox", "🕹️ Gearbox"}, {"body", "🚙 Body"}, {"color", "🎨 Color"}, {"inspection", "🔧 Inspection"},
+		{"region", "📍 Location"}, {"gearbox", "🕹️ Gearbox"}, {"body", "🚙 Body"}, {"color", "🎨 Color"}, {"inspection", "🔧 Inspection"},
 		{"house_type", "🏠 House"},
 	} {
 		if v, ok := l.Str(f.key); ok {

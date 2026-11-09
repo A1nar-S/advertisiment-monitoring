@@ -5,13 +5,21 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
 	"log/slog"
 
+	"github.com/A1nar-S/advertisiment-monitoring/internal/bot"
+	"github.com/A1nar-S/advertisiment-monitoring/internal/bot/discordbot"
+	"github.com/A1nar-S/advertisiment-monitoring/internal/dashboard"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/events"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/listings"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/notifications"
@@ -21,6 +29,7 @@ import (
 	"github.com/A1nar-S/advertisiment-monitoring/internal/scraping"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/sources"
 	"github.com/A1nar-S/advertisiment-monitoring/internal/subscriptions"
+	"github.com/A1nar-S/advertisiment-monitoring/internal/web"
 )
 
 const relayBatch = 100
@@ -53,12 +62,20 @@ func Scraper(ctx context.Context, cfg config.Scraper, reg sources.Registry) erro
 	}
 	defer producer.Close()
 
+	// Status messages go where /setup status-channel said, else to the .env
+	// channel. Looked up per message: they are rare and the setting may change.
 	alert := func(ctx context.Context, text string) {
-		if cfg.AdminChannel.Target == "" {
+		ch := events.Channel{Kind: cfg.AdminChannel.Kind, Target: cfg.AdminChannel.Target}
+		if set, ok, err := subs.StatusChannel(ctx); err != nil {
+			slog.Warn("status channel setting", "err", err)
+		} else if ok {
+			ch = set
+		}
+		if ch.Target == "" {
 			return
 		}
 		err := producer.Publish(ctx, cfg.Topic(events.TopicNotificationsRequested), "admin", events.NotificationRequested{
-			Channel: events.Channel{Kind: cfg.AdminChannel.Kind, Target: cfg.AdminChannel.Target},
+			Channel: ch,
 			Text:    text,
 		})
 		if err != nil {
@@ -177,12 +194,6 @@ func Matcher(ctx context.Context, cfg config.Matcher, reg sources.Registry) erro
 	if err := subs.Migrate(ctx); err != nil {
 		return err
 	}
-	if cfg.UsersFile != "" {
-		if err := subs.SeedFromFile(ctx, cfg.UsersFile); err != nil {
-			return err
-		}
-		slog.Info("seeded users", "file", cfg.UsersFile)
-	}
 
 	producer, err := kafka.NewProducer(cfg.KafkaBrokers)
 	if err != nil {
@@ -226,4 +237,96 @@ func Notifier(ctx context.Context, cfg config.Notifier, notifiers ...notificatio
 
 	slog.Info("starting notifier", "burst", cfg.Burst, "burst_window", cfg.BurstWindow)
 	return kafka.Consume(ctx, cfg.KafkaBrokers, cfg.Group("notifier"), cfg.Topic(events.TopicNotificationsRequested), svc.Handle)
+}
+
+// Bot runs the chat bot users manage their searches with, on every
+// platform it has an adapter for (Discord now).
+func Bot(ctx context.Context, cfg config.Bot, reg sources.Registry) error {
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	discord, err := discordbot.New(cfg.DiscordBotToken)
+	if err != nil {
+		return err
+	}
+	// The Discord app's owners are admins too, so /setup works without
+	// ADMIN_USERS.
+	admins := slices.Clone(cfg.Admins)
+	if owners, err := discord.Owners(); err != nil {
+		slog.Warn("cannot read the Discord app's owners; only ADMIN_USERS are admins", "err", err)
+	} else {
+		for _, id := range owners {
+			admins = append(admins, discordbot.Platform+":"+id)
+		}
+	}
+	subs := subscriptions.NewService(pool, reg, cfg.FeedCollapseAt).WithLimits(cfg.MaxSearches, admins)
+	store := listings.NewService(pool, listings.DefaultSeedWindow) // to show /matches
+	for _, m := range []func(context.Context) error{subs.Migrate, store.Migrate} {
+		if err := m(ctx); err != nil {
+			return err
+		}
+	}
+
+	core := bot.New(discord, subs, botAds{store}, cfg.PublicURL, cfg.MaxSearches)
+	slog.Info("starting bot", "platform", discordbot.Platform, "max_searches", cfg.MaxSearches, "admins", len(admins))
+	return discord.Serve(ctx, core, cfg.GuildID)
+}
+
+// botAds shows the bot stored ads without the bot importing the listings slice.
+type botAds struct{ store *listings.Service }
+
+func (a botAds) Ads(ctx context.Context, source string, ids []string) (map[string]bot.Ad, error) {
+	found, err := a.store.Summaries(ctx, source, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bot.Ad, len(found))
+	for id, s := range found {
+		out[id] = bot.Ad{Title: s.Title, URL: s.URL, Price: s.Price, Location: s.Location}
+	}
+	return out, nil
+}
+
+// API serves the dashboard and its JSON API.
+func API(ctx context.Context, cfg config.API, reg sources.Registry) error {
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	subs := subscriptions.NewService(pool, reg, cfg.FeedCollapseAt).WithLimits(cfg.MaxSearches, cfg.Admins)
+	store := listings.NewService(pool, listings.DefaultSeedWindow)
+	for _, m := range []func(context.Context) error{subs.Migrate, store.Migrate} {
+		if err := m(ctx); err != nil {
+			return err
+		}
+	}
+	webDir := cfg.WebDir
+	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
+		slog.Warn("no built dashboard; serving the API only (run bun run build in web/)", "dir", webDir)
+		webDir = ""
+	}
+	server := &http.Server{
+		Addr: cfg.Addr,
+		Handler: web.New(web.Config{
+			Searches: subs, Listings: store, Overview: dashboard.NewHandler(dashboard.Load(pool)),
+			WebDir: webDir, PublicURL: cfg.PublicURL, MaxSearches: cfg.MaxSearches,
+		}),
+		ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: time.Minute,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			slog.Error("shutdown", "err", err)
+		}
+	}()
+	slog.Info("dashboard", "listen", cfg.Addr, "public_url", cfg.PublicURL)
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }

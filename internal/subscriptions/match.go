@@ -27,6 +27,11 @@ type Filters struct {
 	OneOf map[string][]string `json:"one_of,omitempty"`
 	// AllOf requires a list attribute (car equipment) to contain every value.
 	AllOf map[string][]string `json:"all_of,omitempty"`
+	// Contains requires any of the words in the listing's title or in the
+	// text attribute named by the key (an ad's full description), ignoring
+	// case and diacritics. The title is often the text's first line, so the
+	// attribute is needed only when the title lacks every word.
+	Contains map[string][]string `json:"contains,omitempty"`
 }
 
 // Search is one user's saved search.
@@ -119,11 +124,42 @@ func (s Search) Evaluate(src sources.Source, l events.ListingDiscovered, enricha
 			}
 		}
 	}
+	for key, words := range s.Filters.Contains {
+		if containsWord(l.Title, words) {
+			continue
+		}
+		text, ok := l.Str(key)
+		if ok && containsWord(text, words) {
+			continue
+		}
+		if ok || !undecided(key) {
+			return NoMatch
+		}
+	}
 	if need {
 		return NeedsDetail
 	}
 	return Matched
 }
+
+// containsWord reports whether text contains any of words, ignoring case and
+// Latvian diacritics ("dizelis" finds "Dīzelis").
+func containsWord(text string, words []string) bool {
+	text = foldText(text)
+	for _, w := range words {
+		if w = foldText(w); w != "" && strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func foldText(s string) string { return diacritics.Replace(strings.ToLower(strings.TrimSpace(s))) }
+
+var diacritics = strings.NewReplacer(
+	"ā", "a", "č", "c", "ē", "e", "ģ", "g", "ī", "i", "ķ", "k", "ļ", "l", "ņ", "n",
+	"š", "s", "ū", "u", "ž", "z", "ō", "o", "ŗ", "r",
+)
 
 // strList reads a list attr; it is []string in-process and []any after a
 // JSON round trip through Kafka.

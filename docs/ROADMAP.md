@@ -14,10 +14,11 @@ Do not bypass access controls.
 
 ## Next steps
 
-- [ ] Verify real Discord delivery; add Telegram.
+- [ ] Verify real Discord delivery and the bot's commands; add Telegram (a `bot.Messenger` adapter plus a `Notifier`).
 - [x] Notification burst limits/digests (per search; `NOTIFY_BURST`).
 - [ ] Schedule stale-data cleanup (`make purge` exists; needs a cron or a scheduler).
-- [ ] Add dashboard authentication, user access controls, and search editing.
+- [x] Self-service searches: Discord bot (`/watch`, `/edit`, `/searches`, `/matches`, `/dashboard`) and dashboard editing, with login links,
+  per-user limits and admins. No config file.
 - [x] ss.com codebooks for cars and flats; searches use the search forms' names, validated on seed.
 - [ ] Serve the codebooks through the API for a dashboard search editor (then move them to a table).
 - [ ] Replace category-path parsing with strongly typed categories across adapters,
@@ -73,7 +74,7 @@ delivered through the existing bot. Scraping adapters also need failure/recovery
 
 ## Later
 
-- [ ] Dashboard watch editing, pause/resume, price history, and last-check status; chat commands.
+- [ ] Price history and last-check status in the dashboard; price-watch commands in the bot.
 - [ ] Restock rules. Keep advertised discounts separate from observed price drops.
 - [ ] Preserve active watches and required price history during cleanup.
 - [ ] Add City24, Vinted, and shop/marketplace adapters one at a time, with parser fixtures and health checks.

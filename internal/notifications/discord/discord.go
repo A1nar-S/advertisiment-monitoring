@@ -4,11 +4,13 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/A1nar-S/advertisiment-monitoring/internal/events"
+	"github.com/A1nar-S/advertisiment-monitoring/internal/notifications"
 )
 
 const embedColor = 0x3fbc58
@@ -31,11 +33,25 @@ func (n *Notifier) Kind() string { return "discord" }
 
 func (n *Notifier) NotifyText(ctx context.Context, channelID, msg string) error {
 	_, err := n.session.ChannelMessageSend(channelID, msg, discordgo.WithContext(ctx))
-	return err
+	return classify(err)
 }
 
 func (n *Notifier) NotifyListing(ctx context.Context, channelID string, l events.ListingDiscovered) error {
 	_, err := n.session.ChannelMessageSendEmbed(channelID, embed(l), discordgo.WithContext(ctx))
+	return classify(err)
+}
+
+// classify marks errors no retry can fix (DMs closed, channel deleted, the
+// bot removed from it) as undeliverable, so they are dropped, not retried.
+func classify(err error) error {
+	var re *discordgo.RESTError
+	if errors.As(err, &re) && re.Message != nil {
+		switch re.Message.Code {
+		case discordgo.ErrCodeCannotSendMessagesToThisUser, discordgo.ErrCodeUnknownChannel,
+			discordgo.ErrCodeMissingAccess, discordgo.ErrCodeMissingPermissions:
+			return fmt.Errorf("%w: %w", notifications.ErrUndeliverable, err)
+		}
+	}
 	return err
 }
 

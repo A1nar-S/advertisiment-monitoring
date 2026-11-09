@@ -226,7 +226,7 @@ func str(key string) column {
 
 // fuelSuffix maps the engine column's suffix ("3.0D") to the search form's
 // fuel names. No suffix is petrol; petrol/gas looks the same on the list, so
-// a petrol/gas search also accepts plain petrol (see NormalizeSearch).
+// a petrol/gas search also accepts plain petrol (see CompileSearch).
 var fuelSuffix = map[string]string{"": "Benzīns", "D": "Dīzelis", "H": "Hibrīds", "E": "Elektriskais"}
 
 // engine reads "3.0D" as 3.0 litres, fuel "Dīzelis".
