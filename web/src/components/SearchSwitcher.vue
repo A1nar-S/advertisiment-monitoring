@@ -8,6 +8,7 @@ import {
 } from 'lucide-vue-next'
 import type { Search } from '../api'
 import { navigate } from '../router'
+import { t } from '../i18n'
 
 // The current search's name in the breadcrumb; it opens a short menu for
 // jumping straight to another search (or starting a new one).
@@ -65,13 +66,13 @@ onBeforeUnmount(() =>
       aria-haspopup="true"
       @click="open ? close() : (open = true)"
     >
-      <span class="truncate">{{ current?.name ?? 'New search' }}</span>
+      <span class="truncate">{{ current?.name ?? t('searches.new') }}</span>
       <ChevronsUpDown :size="14" class="shrink-0 text-gray-500" />
     </button>
 
     <div
       v-if="open"
-      class="absolute top-full left-0 z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-white p-1 shadow-raised"
+      class="absolute top-full left-0 z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-1 shadow-raised"
     >
       <label
         v-if="searches.length > 6"
@@ -82,8 +83,8 @@ onBeforeUnmount(() =>
           ref="filter"
           v-model="query"
           class="w-full bg-transparent text-sm outline-none placeholder:text-gray-400 focus-visible:outline-none"
-          placeholder="Find a search"
-          aria-label="Find a search"
+          :placeholder="t('switcher.find')"
+          :aria-label="t('switcher.find')"
         />
       </label>
       <ul class="max-h-80 overflow-y-auto">
@@ -103,7 +104,7 @@ onBeforeUnmount(() =>
                   [
                     showOwner ? s.userName : '',
                     categoryLabel(s.category),
-                    s.enabled ? '' : 'Paused',
+                    s.enabled ? '' : t('common.paused'),
                   ]
                     .filter(Boolean)
                     .join(' · ')
@@ -118,7 +119,7 @@ onBeforeUnmount(() =>
           </button>
         </li>
         <li v-if="!visible.length" class="px-2.5 py-2 text-sm text-gray-500">
-          No search by that name.
+          {{ t('switcher.none') }}
         </li>
       </ul>
       <div class="mt-1 border-t border-gray-150 pt-1">
@@ -127,7 +128,7 @@ onBeforeUnmount(() =>
           class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900"
           @click="go('/searches/new')"
         >
-          <Plus :size="16" class="text-gray-500" />New search
+          <Plus :size="16" class="text-gray-500" />{{ t('searches.new') }}
         </button>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { ArrowUpRight, Bell, CircleAlert, ImageOff } from 'lucide-vue-next'
 import EmptyState from './EmptyState.vue'
 import PageHeader from './PageHeader.vue'
 import { api, ApiError, type Match } from '../api'
+import { formatDate, t } from '../i18n'
 
 const matches = ref<Match[]>([])
 const error = ref('')
@@ -17,9 +18,10 @@ function dayLabel(at: string) {
   const today = new Date()
   const yesterday = new Date()
   yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) return 'Today'
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return date.toLocaleDateString([], {
+  if (date.toDateString() === today.toDateString()) return t('alerts.today')
+  if (date.toDateString() === yesterday.toDateString())
+    return t('alerts.yesterday')
+  return formatDate(date, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -28,7 +30,7 @@ function dayLabel(at: string) {
 }
 
 const time = (at: string) =>
-  new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  formatDate(at, { hour: '2-digit', minute: '2-digit' })
 
 // Matches arrive newest first; group them under one heading per day.
 const days = computed(() => {
@@ -47,9 +49,7 @@ onMounted(async () => {
     matches.value = await api.matches(100)
   } catch (reason) {
     error.value =
-      reason instanceof ApiError
-        ? reason.message
-        : 'Could not load your alerts.'
+      reason instanceof ApiError ? reason.message : t('alerts.loadFailed')
   } finally {
     loading.value = false
   }
@@ -58,10 +58,7 @@ onMounted(async () => {
 
 <template>
   <section>
-    <PageHeader
-      title="Alerts"
-      description="The latest ads your searches found, newest first."
-    />
+    <PageHeader :title="t('alerts.title')" :description="t('alerts.lead')" />
 
     <div v-if="error" role="alert" class="message-bar-danger mb-6">
       <CircleAlert :size="16" class="mt-0.5 shrink-0 text-danger-600" />{{
@@ -74,7 +71,7 @@ onMounted(async () => {
         v-if="loading"
         class="divide-y divide-gray-100"
         role="status"
-        aria-label="Loading alerts"
+        :aria-label="t('alerts.loading')"
       >
         <div v-for="n in 4" :key="n" class="flex items-center gap-4 px-4 py-3">
           <div class="skeleton h-12 w-16 rounded-md" />
@@ -89,8 +86,8 @@ onMounted(async () => {
       <EmptyState
         v-else-if="!matches.length"
         :icon="Bell"
-        title="No alerts yet"
-        description="When a new ad matches one of your searches, it shows up here and in Discord."
+        :title="t('alerts.emptyTitle')"
+        :description="t('alerts.emptyBody')"
       />
 
       <template v-else>
@@ -135,7 +132,7 @@ onMounted(async () => {
                     class="truncate text-sm"
                     :class="m.listing ? 'text-gray-900' : 'text-gray-500'"
                   >
-                    {{ m.listing?.title ?? 'This ad is no longer stored' }}
+                    {{ m.listing?.title ?? t('alerts.notStored') }}
                   </p>
                   <p
                     class="mt-0.5 truncate text-small text-gray-500 tabular-nums"
@@ -145,7 +142,7 @@ onMounted(async () => {
                         m.searchName,
                         time(m.at),
                         m.listing && !m.listing.active
-                          ? 'No longer listed'
+                          ? t('alerts.noLongerListed')
                           : '',
                       ]
                         .filter(Boolean)

@@ -15,7 +15,7 @@ const checked = defineModel<boolean>({ required: true })
     :class="
       checked
         ? 'bg-brand-600 hover:bg-brand-700'
-        : 'bg-white shadow-[inset_0_0_0_1px_var(--color-gray-500)] hover:shadow-[inset_0_0_0_1px_var(--color-gray-700)]'
+        : 'bg-field shadow-[inset_0_0_0_1px_var(--color-gray-500)] hover:shadow-[inset_0_0_0_1px_var(--color-gray-700)]'
     "
     @click="checked = !checked"
   >

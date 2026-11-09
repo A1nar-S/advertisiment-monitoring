@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { X } from 'lucide-vue-next'
+import { t } from '../i18n'
 
 // A native modal <dialog>: a side sheet for editors and details, or a small
 // centered box for confirmations. Mount it with v-if; Esc and the close
@@ -63,8 +64,8 @@ function onClick(event: MouseEvent) {
           v-if="variant === 'sheet'"
           type="button"
           class="btn-icon -mr-2"
-          aria-label="Close"
-          title="Close"
+          :aria-label="t('common.close')"
+          :title="t('common.close')"
           @click="emit('close')"
         >
           <X :size="18" />

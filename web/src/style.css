@@ -66,19 +66,101 @@
   --text-display: 1.75rem;
   --text-display--line-height: 2.25rem;
 
+  /* Surfaces: cards and panels, selected segments and buttons, inputs. */
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-raised-hover: #fbfbfc;
+  --color-field: #ffffff;
+
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.625rem;
 
-  --shadow-card: 0 0 0 1px rgb(20 28 44 / 0.06), 0 1px 2px rgb(20 28 44 / 0.06);
-  --shadow-raised:
+  --ease-decelerate: cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+/* Shadows and the dialog backdrop are plain variables (not @theme), so the
+   dark theme can replace them: Tailwind bakes theme shadows into utilities. */
+:root {
+  --elevation-card:
+    0 0 0 1px rgb(20 28 44 / 0.06), 0 1px 2px rgb(20 28 44 / 0.06);
+  --elevation-raised:
     0 0 0 1px rgb(20 28 44 / 0.06), 0 2px 4px rgb(20 28 44 / 0.06),
     0 8px 16px rgb(20 28 44 / 0.08);
-  --shadow-overlay:
+  --elevation-overlay:
     0 0 0 1px rgb(20 28 44 / 0.06), 0 8px 24px rgb(20 28 44 / 0.12),
     0 32px 64px rgb(20 28 44 / 0.16);
+  --edge-subtle: rgb(20 28 44 / 0.05);
+  --backdrop: rgb(16 20 28 / 0.32);
+}
 
-  --ease-decelerate: cubic-bezier(0.1, 0.9, 0.2, 1);
+/*
+ * Dark: carbon black. Pure neutral greys with no blue or purple cast; the
+ * brand blue stays only on primary actions and focus. Surfaces get lighter
+ * as they come forward: canvas, card, field, raised.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-gray-25: #1c1c1c;
+  --color-gray-50: #0d0d0d;
+  --color-gray-100: #242424;
+  --color-gray-150: #2a2a2a;
+  --color-gray-200: #333333;
+  --color-gray-300: #424242;
+  --color-gray-400: #5f5f5f;
+  --color-gray-500: #8b8b8b;
+  --color-gray-600: #a6a6a6;
+  --color-gray-700: #c4c4c4;
+  --color-gray-800: #dddddd;
+  --color-gray-900: #f2f2f2;
+
+  --color-surface: #161616;
+  --color-raised: #2b2b2b;
+  --color-raised-hover: #333333;
+  --color-field: #1b1b1b;
+
+  --color-brand-50: #142130;
+  --color-brand-100: #1b2d40;
+  --color-brand-200: #25405c;
+  --color-brand-500: #479ef5;
+  --color-brand-600: #2b88d8;
+  --color-brand-700: #4ea3ec;
+  --color-brand-800: #6fb6f1;
+
+  --color-success-50: #102018;
+  --color-success-100: #1b3426;
+  --color-success-600: #3fb26b;
+  --color-success-700: #74d095;
+
+  --color-warning-50: #241b0c;
+  --color-warning-100: #3d2d14;
+  --color-warning-600: #e0a23a;
+  --color-warning-700: #f2bf66;
+
+  --color-danger-50: #2a1313;
+  --color-danger-100: #461e1e;
+  --color-danger-600: #e04a40;
+  --color-danger-700: #ff8278;
+
+  --elevation-card:
+    0 0 0 1px rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.5);
+  --elevation-raised:
+    0 0 0 1px rgb(255 255 255 / 0.08), 0 8px 24px rgb(0 0 0 / 0.55);
+  --elevation-overlay:
+    0 0 0 1px rgb(255 255 255 / 0.08), 0 24px 64px rgb(0 0 0 / 0.7);
+  --edge-subtle: rgb(0 0 0 / 0.4);
+  --backdrop: rgb(0 0 0 / 0.6);
+}
+
+@utility shadow-card {
+  box-shadow: var(--elevation-card);
+}
+@utility shadow-raised {
+  box-shadow: var(--elevation-raised);
+}
+@utility shadow-overlay {
+  box-shadow: var(--elevation-overlay);
 }
 
 @layer base {
@@ -133,7 +215,7 @@
   @apply btn bg-brand-600 text-white shadow-[0_1px_2px_rgb(15_108_189/0.25)] hover:bg-brand-700 active:bg-brand-800;
 }
 @utility btn-secondary {
-  @apply btn bg-white text-gray-900 shadow-[0_0_0_1px_var(--color-gray-200),0_1px_2px_rgb(20_28_44/0.05)] hover:bg-gray-25 hover:shadow-[0_0_0_1px_var(--color-gray-300),0_1px_2px_rgb(20_28_44/0.05)] active:bg-gray-50;
+  @apply btn bg-raised text-gray-900 shadow-[0_0_0_1px_var(--color-gray-200),0_1px_2px_var(--edge-subtle)] hover:bg-raised-hover hover:shadow-[0_0_0_1px_var(--color-gray-300),0_1px_2px_var(--edge-subtle)] active:bg-gray-100;
 }
 @utility btn-subtle {
   @apply btn text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-150;
@@ -148,10 +230,10 @@
 /* Inputs follow Fluent: a hairline box whose bottom edge turns brand blue
    and thickens on focus. */
 @utility field {
-  @apply h-8 w-full min-w-0 rounded-md border border-gray-200 border-b-gray-400 bg-white px-2.5 text-sm text-gray-900 transition-[border-color,box-shadow] duration-100 placeholder:text-gray-400 hover:border-gray-300 hover:border-b-gray-500 focus:border-b-brand-600 focus:shadow-[inset_0_-1px_0_var(--color-brand-600)] focus:outline-none disabled:border-gray-150 disabled:bg-gray-50 disabled:text-gray-500;
+  @apply h-8 w-full min-w-0 rounded-md border border-gray-200 border-b-gray-400 bg-field px-2.5 text-sm text-gray-900 transition-[border-color,box-shadow] duration-100 placeholder:text-gray-400 hover:border-gray-300 hover:border-b-gray-500 focus:border-b-brand-600 focus:shadow-[inset_0_-1px_0_var(--color-brand-600)] focus:outline-none disabled:border-gray-150 disabled:bg-gray-50 disabled:text-gray-500;
 }
 @utility field-within {
-  @apply rounded-md border border-gray-200 border-b-gray-400 bg-white transition-[border-color,box-shadow] duration-100 hover:border-gray-300 hover:border-b-gray-500 focus-within:border-b-brand-600 focus-within:shadow-[inset_0_-1px_0_var(--color-brand-600)];
+  @apply rounded-md border border-gray-200 border-b-gray-400 bg-field transition-[border-color,box-shadow] duration-100 hover:border-gray-300 hover:border-b-gray-500 focus-within:border-b-brand-600 focus-within:shadow-[inset_0_-1px_0_var(--color-brand-600)];
 }
 select.field {
   @apply appearance-none pr-8;
@@ -167,7 +249,7 @@ select.field {
 }
 
 @utility card {
-  @apply rounded-lg bg-white shadow-card;
+  @apply rounded-lg bg-surface shadow-card;
 }
 
 @utility badge {
@@ -211,7 +293,7 @@ select.field {
 /* Side sheets and dialogs (BaseDialog.vue). */
 dialog.sheet,
 dialog.modal {
-  @apply max-h-none max-w-none overflow-hidden bg-white p-0 text-gray-900;
+  @apply max-h-none max-w-none overflow-hidden bg-surface p-0 text-gray-900;
 }
 dialog.sheet {
   @apply my-0 mr-0 ml-auto h-dvh w-full shadow-overlay sm:w-[560px];
@@ -223,7 +305,7 @@ dialog.modal {
 }
 dialog.sheet::backdrop,
 dialog.modal::backdrop {
-  background: rgb(16 20 28 / 0.32);
+  background: var(--backdrop);
   animation: fade-in 200ms ease-out;
 }
 

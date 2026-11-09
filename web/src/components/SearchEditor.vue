@@ -36,6 +36,7 @@ import {
 } from '../api'
 import { navigate, onLinkClick, setLeaveGuard } from '../router'
 import { showEveryone } from '../state'
+import { categoryName, fieldLabel, formatDate, t } from '../i18n'
 
 // Creates or edits one search on its own page (/searches/new, /searches/12).
 // The form is built from the source's catalog (/api/categories), so new
@@ -63,21 +64,19 @@ const fields = computed(
   () => categories.value.find((c) => c.id === category.value)?.fields ?? [],
 )
 const categoryLabel = (id: string) =>
-  categories.value.find((c) => c.id === id)?.label ?? id
+  categoryName(id, categories.value.find((c) => c.id === id)?.label ?? id)
 const sections = computed(() =>
   [
     {
       id: 'filters',
-      title: 'Filters',
-      description:
-        'Leave a filter empty to match everything. Picking a make narrows the models to choose from.',
+      title: t('editor.filtersTitle'),
+      description: t('editor.filtersLead'),
       fields: fields.value.filter((f) => !f.detail),
     },
     {
       id: 'details',
-      title: 'Ad page filters',
-      description:
-        'Checked only for new ads that already match the filters above, because each check opens the ad page.',
+      title: t('editor.adPageTitle'),
+      description: t('editor.adPageLead'),
       fields: fields.value.filter((f) => f.detail),
     },
   ].filter((section) => section.fields.length),
@@ -130,6 +129,7 @@ const dirty = computed(
   () => state.value === 'ready' && JSON.stringify(input()) !== snapshot.value,
 )
 const summary = computed(() => describe(collect(), fields.value))
+const unfiltered = computed(() => !Object.keys(collect()).length)
 const currentFilters = computed(() => collect())
 const preview = ref<Preview | null>(null)
 
@@ -167,7 +167,7 @@ async function load() {
     }
   } catch (reason) {
     error.value =
-      reason instanceof ApiError ? reason.message : 'Could not load the search.'
+      reason instanceof ApiError ? reason.message : t('editor.loadFailed')
     state.value = 'failed'
   }
 }
@@ -182,7 +182,7 @@ async function save() {
     navigate('/searches')
   } catch (reason) {
     error.value =
-      reason instanceof ApiError ? reason.message : 'Could not save the search.'
+      reason instanceof ApiError ? reason.message : t('editor.saveFailed')
   } finally {
     saving.value = false
   }
@@ -198,9 +198,7 @@ async function remove() {
     navigate('/searches', { replace: true })
   } catch (reason) {
     error.value =
-      reason instanceof ApiError
-        ? reason.message
-        : 'Could not delete the search.'
+      reason instanceof ApiError ? reason.message : t('editor.deleteFailed')
   }
 }
 
@@ -244,16 +242,16 @@ function optionsFor(f: FieldSpec): string[] {
 }
 
 function hint(f: FieldSpec): string {
-  if (f.key === 'model') return 'End with * for every generation, e.g. Passat*'
-  if (f.kind === 'all') return 'The car must have all of these.'
-  if (f.kind === 'text') return 'Any of these words, e.g. quattro.'
-  if (f.dependsOn === 'region') return 'Leave empty for the whole region.'
+  if (f.key === 'model') return t('editor.hintModel')
+  if (f.kind === 'all') return t('editor.hintAll')
+  if (f.kind === 'text') return t('editor.hintText')
+  if (f.dependsOn === 'region') return t('editor.hintRegion')
   return ''
 }
 
 const created = computed(() =>
   search.value
-    ? new Date(search.value.createdAt).toLocaleDateString([], {
+    ? formatDate(search.value.createdAt, {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
@@ -265,14 +263,14 @@ const created = computed(() =>
 <template>
   <section>
     <nav
-      aria-label="Breadcrumb"
+      :aria-label="t('editor.breadcrumb')"
       class="mb-3 flex min-w-0 items-center gap-1 text-small"
     >
       <a
         href="/searches"
         class="shrink-0 rounded-md px-1.5 py-0.5 -ml-1.5 text-gray-600 hover:bg-gray-150/70 hover:text-gray-900"
         @click="onLinkClick($event, '/searches')"
-        >Searches</a
+        >{{ t('searches.title') }}</a
       >
       <ChevronRight :size="14" class="shrink-0 text-gray-400" />
       <SearchSwitcher
@@ -283,11 +281,15 @@ const created = computed(() =>
         :show-owner="showEveryone"
       />
       <span v-else class="px-1.5 font-medium text-gray-900">{{
-        id === 'new' ? 'New search' : 'Search'
+        id === 'new' ? t('searches.new') : t('editor.search')
       }}</span>
     </nav>
 
-    <div v-if="state === 'loading'" role="status" aria-label="Loading">
+    <div
+      v-if="state === 'loading'"
+      role="status"
+      :aria-label="t('common.loading')"
+    >
       <div class="skeleton mb-2 h-8 w-64" />
       <div class="skeleton mb-10 h-4 w-96 max-w-full" />
       <div
@@ -306,11 +308,11 @@ const created = computed(() =>
     <div v-else-if="state === 'missing'" class="card">
       <EmptyState
         :icon="FileQuestion"
-        title="This search doesn't exist"
-        description="It may have been deleted, or it belongs to someone else."
+        :title="t('editor.missingTitle')"
+        :description="t('editor.missingBody')"
       >
         <button class="btn-secondary" @click="navigate('/searches')">
-          Back to searches
+          {{ t('editor.backToSearches') }}
         </button>
       </EmptyState>
     </div>
@@ -318,36 +320,35 @@ const created = computed(() =>
     <div v-else-if="state === 'failed'" class="card">
       <EmptyState
         :icon="CircleAlert"
-        title="Couldn't load this search"
+        :title="t('editor.loadFailedTitle')"
         :description="error"
       >
-        <button class="btn-secondary" @click="load">Try again</button>
+        <button class="btn-secondary" @click="load">
+          {{ t('common.tryAgain') }}
+        </button>
       </EmptyState>
     </div>
 
     <form v-else @submit.prevent="save">
-      <PageHeader :title="search ? search.name : 'New search'">
+      <PageHeader :title="search ? search.name : t('searches.new')">
         <template #description>
           <template v-if="search">
             {{
               [
                 showEveryone || search.userName !== me.name
-                  ? `Created by ${search.userName}`
+                  ? t('editor.createdBy', { name: search.userName })
                   : '',
-                `Created ${created}`,
-                `${search.matches.toLocaleString()} alerts so far`,
+                t('editor.created', { date: created }),
+                t('editor.alertsSoFar', { n: search.matches }),
               ]
                 .filter(Boolean)
                 .join(' · ')
             }}
-            <span v-if="!search.enabled" class="badge-warning ml-1.5"
-              >Paused</span
-            >
+            <span v-if="!search.enabled" class="badge-warning ml-1.5">{{
+              t('common.paused')
+            }}</span>
           </template>
-          <template v-else
-            >Choose what to watch for. New ads that match are sent to Discord as
-            soon as they're posted.</template
-          >
+          <template v-else>{{ t('editor.newLead') }}</template>
         </template>
         <button
           v-if="search"
@@ -355,7 +356,7 @@ const created = computed(() =>
           class="btn-secondary text-danger-600 hover:text-danger-700"
           @click="deleting = true"
         >
-          <Trash2 :size="15" />Delete
+          <Trash2 :size="15" />{{ t('common.delete') }}
         </button>
       </PageHeader>
 
@@ -364,26 +365,27 @@ const created = computed(() =>
         aria-labelledby="general-heading"
       >
         <div>
-          <h2 id="general-heading" class="text-base font-semibold">General</h2>
+          <h2 id="general-heading" class="text-base font-semibold">
+            {{ t('editor.generalTitle') }}
+          </h2>
           <p class="mt-1 text-small text-gray-500">
-            The name is only for you. Alerts go to the Discord channel or direct
-            message you pick here.
+            {{ t('editor.generalLead') }}
           </p>
         </div>
         <div class="card grid gap-5 p-5 sm:grid-cols-2 sm:p-6">
           <label class="block sm:col-span-2">
-            <span class="field-label">Name</span>
+            <span class="field-label">{{ t('editor.name') }}</span>
             <input
               ref="nameInput"
               v-model="name"
               class="field sm:max-w-md"
               maxlength="80"
               required
-              placeholder="e.g. Family car under €7,000"
+              :placeholder="t('editor.namePlaceholder')"
             />
           </label>
           <label class="block">
-            <span class="field-label">Category</span>
+            <span class="field-label">{{ t('editor.category') }}</span>
             <select
               v-model="category"
               class="field"
@@ -391,15 +393,15 @@ const created = computed(() =>
               @change="fillFilters({})"
             >
               <option v-for="c in categories" :key="c.id" :value="c.id">
-                {{ c.label }}
+                {{ categoryName(c.id, c.label) }}
               </option>
             </select>
-            <span v-if="search" class="field-hint block"
-              >Can't be changed after creating.</span
-            >
+            <span v-if="search" class="field-hint block">{{
+              t('editor.categoryLocked')
+            }}</span>
           </label>
           <label class="block">
-            <span class="field-label">Send alerts to</span>
+            <span class="field-label">{{ t('editor.sendTo') }}</span>
             <select
               v-model="channelId"
               class="field"
@@ -419,8 +421,9 @@ const created = computed(() =>
               class="mt-0.5 shrink-0 text-warning-600"
             />
             <span
-              >Run <span class="kbd">/dashboard</span> in Discord once so alerts
-              have somewhere to go.</span
+              >{{ t('editor.noChannelBefore') }}
+              <span class="kbd">/dashboard</span>
+              {{ t('editor.noChannelAfter') }}</span
             >
           </div>
         </div>
@@ -443,7 +446,7 @@ const created = computed(() =>
         <div class="card grid gap-x-5 gap-y-5 p-5 sm:grid-cols-2 sm:p-6">
           <div v-for="f in section.fields" :key="f.key" class="min-w-0">
             <label :for="`f-${f.key}`" class="field-label"
-              >{{ f.label
+              >{{ fieldLabel(f.key, f.label)
               }}<span
                 v-if="f.required"
                 class="text-danger-600"
@@ -459,18 +462,22 @@ const created = computed(() =>
                 type="number"
                 step="any"
                 min="0"
-                placeholder="Min"
+                :placeholder="t('editor.min')"
                 class="field tabular-nums"
-                :aria-label="`${f.label} minimum`"
+                :aria-label="
+                  t('editor.minOf', { label: fieldLabel(f.key, f.label) })
+                "
               /><span class="text-gray-400" aria-hidden="true">–</span
               ><input
                 v-model="ranges[f.key].max"
                 type="number"
                 step="any"
                 min="0"
-                placeholder="Max"
+                :placeholder="t('editor.max')"
                 class="field tabular-nums"
-                :aria-label="`${f.label} maximum`"
+                :aria-label="
+                  t('editor.maxOf', { label: fieldLabel(f.key, f.label) })
+                "
               />
             </div>
             <MultiSelect
@@ -481,10 +488,10 @@ const created = computed(() =>
               :allow-free="f.key === 'model' || f.kind === 'text'"
               :placeholder="
                 f.kind === 'all'
-                  ? 'Must have…'
+                  ? t('editor.mustHave')
                   : f.kind === 'text'
-                    ? 'Type a word, press Enter'
-                    : 'Any'
+                    ? t('editor.typeWord')
+                    : t('editor.any')
               "
             />
             <p v-if="hint(f)" class="field-hint">{{ hint(f) }}</p>
@@ -492,8 +499,9 @@ const created = computed(() =>
               v-if="f.kind === 'text'"
               class="mt-1.5 flex items-start gap-1.5 text-xs text-warning-700"
             >
-              <TriangleAlert :size="13" class="mt-px shrink-0" />Opens every
-              matching ad page, so narrow it down with make and model first.
+              <TriangleAlert :size="13" class="mt-px shrink-0" />{{
+                t('editor.keywordsWarning')
+              }}
             </p>
           </div>
         </div>
@@ -505,10 +513,11 @@ const created = computed(() =>
         aria-labelledby="preview-heading"
       >
         <div>
-          <h2 id="preview-heading" class="text-base font-semibold">Preview</h2>
+          <h2 id="preview-heading" class="text-base font-semibold">
+            {{ t('editor.previewTitle') }}
+          </h2>
           <p class="mt-1 text-small text-gray-500">
-            Ads already collected that these filters would have matched, so you
-            can check them before saving. Updates as you edit; nothing is sent.
+            {{ t('editor.previewLead') }}
           </p>
         </div>
         <SearchPreview
@@ -521,7 +530,7 @@ const created = computed(() =>
       </section>
 
       <div
-        class="sticky bottom-0 z-10 -mx-4 -mb-8 border-t border-gray-200 bg-white/90 backdrop-blur-md sm:-mx-8 lg:-mx-10 lg:-mb-10"
+        class="sticky bottom-0 z-10 -mx-4 -mb-8 border-t border-gray-200 bg-surface/90 backdrop-blur-md sm:-mx-8 lg:-mx-10 lg:-mb-10"
       >
         <div
           v-if="error"
@@ -541,25 +550,27 @@ const created = computed(() =>
               v-if="preview && preview.inScope"
               href="#preview"
               class="mr-1 font-medium text-brand-700 tabular-nums hover:underline"
-              >{{ preview.matched.toLocaleString() }} collected
-              {{ preview.matched === 1 ? 'ad matches' : 'ads match' }}</a
+              >{{ t('editor.collectedMatch', { n: preview.matched }) }}</a
             ><span v-if="preview && preview.inScope" class="mr-1 text-gray-400"
               >·</span
             >
-            <span v-if="!preview?.inScope" class="text-gray-500">Matches</span>
+            <span v-if="!preview?.inScope" class="text-gray-500">{{
+              t('editor.matches')
+            }}</span>
             {{
-              summary === 'Everything'
+              unfiltered
                 ? preview?.inScope
-                  ? 'Every ad'
-                  : 'every new ad'
+                  ? t('editor.everyAd')
+                  : t('editor.everyNewAd')
                 : summary
             }}
           </p>
           <span
             v-if="dirty"
             class="ml-auto flex items-center gap-1.5 text-small text-gray-500 md:ml-0"
-            ><span class="size-1.5 rounded-full bg-warning-600" />Unsaved
-            changes</span
+            ><span class="size-1.5 rounded-full bg-warning-600" />{{
+              t('editor.unsaved')
+            }}</span
           >
           <button
             type="button"
@@ -567,14 +578,20 @@ const created = computed(() =>
             :class="{ 'ml-auto md:ml-0': !dirty }"
             @click="navigate('/searches')"
           >
-            Cancel
+            {{ t('common.cancel') }}
           </button>
           <button
             type="submit"
             class="btn-primary min-w-28"
             :disabled="saving || !channels.length || (!!search && !dirty)"
           >
-            {{ saving ? 'Saving…' : search ? 'Save changes' : 'Create search' }}
+            {{
+              saving
+                ? t('editor.saving')
+                : search
+                  ? t('editor.save')
+                  : t('editor.create')
+            }}
           </button>
         </div>
       </div>
@@ -583,34 +600,39 @@ const created = computed(() =>
     <BaseDialog
       v-if="pendingLeave"
       variant="modal"
-      title="Discard changes?"
+      :title="t('editor.discardTitle')"
       @close="pendingLeave = null"
     >
       <p class="text-sm text-gray-600">
-        Your changes to this search haven't been saved.
+        {{ t('editor.discardBody') }}
       </p>
       <template #footer>
         <button class="btn-secondary" @click="pendingLeave = null">
-          Keep editing
+          {{ t('editor.keepEditing') }}
         </button>
-        <button class="btn-danger" @click="discard">Discard</button>
+        <button class="btn-danger" @click="discard">
+          {{ t('editor.discard') }}
+        </button>
       </template>
     </BaseDialog>
 
     <BaseDialog
       v-if="deleting && search"
       variant="modal"
-      title="Delete search?"
+      :title="t('searches.deleteTitle')"
       light-dismiss
       @close="deleting = false"
     >
       <p class="text-sm text-gray-600">
-        “{{ search.name }}” and its alert history will be deleted. This can't be
-        undone.
+        {{ t('searches.deleteBody', { name: search.name }) }}
       </p>
       <template #footer>
-        <button class="btn-secondary" @click="deleting = false">Cancel</button>
-        <button class="btn-danger" @click="remove">Delete</button>
+        <button class="btn-secondary" @click="deleting = false">
+          {{ t('common.cancel') }}
+        </button>
+        <button class="btn-danger" @click="remove">
+          {{ t('common.delete') }}
+        </button>
       </template>
     </BaseDialog>
   </section>

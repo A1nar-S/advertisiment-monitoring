@@ -1,3 +1,5 @@
+import { fieldLabel, t } from './i18n'
+
 // Typed client for the Go API (internal/web). The session is an HttpOnly
 // cookie; every change carries X-Requested-With, which the API requires.
 
@@ -125,7 +127,7 @@ export const api = {
 // describe renders filters as one line: "make Skoda, Toyota · price ≤ 7000".
 export function describe(filters: Filters, fields?: FieldSpec[]): string {
   const label = (key: string) =>
-    fields?.find((f) => f.key === key)?.label ?? key
+    fieldLabel(key, fields?.find((f) => f.key === key)?.label ?? key)
   const parts = Object.keys(filters)
     .sort()
     .map((key) => {
@@ -138,7 +140,7 @@ export function describe(filters: Filters, fields?: FieldSpec[]): string {
       return ''
     })
     .filter(Boolean)
-  return parts.length ? parts.join(' · ') : 'Everything'
+  return parts.length ? parts.join(' · ') : t('describe.everything')
 }
 
 // --- search preview ---------------------------------------------------------

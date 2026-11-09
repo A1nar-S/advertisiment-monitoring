@@ -14,7 +14,9 @@ import AdminOverview from './components/AdminOverview.vue'
 import MatchesView from './components/MatchesView.vue'
 import SearchEditor from './components/SearchEditor.vue'
 import SearchesView from './components/SearchesView.vue'
+import PreferencesMenu from './components/PreferencesMenu.vue'
 import { api, ApiError, type Me } from './api'
+import { t } from './i18n'
 import { onLinkClick, route } from './router'
 
 const me = ref<Me | null>(null)
@@ -29,16 +31,21 @@ const navigation = [
   {
     id: 'searches' as const,
     href: '/searches',
-    label: 'Searches',
+    label: 'app.searches' as const,
     icon: SlidersHorizontal,
   },
-  { id: 'alerts' as const, href: '/alerts', label: 'Alerts', icon: Bell },
+  {
+    id: 'alerts' as const,
+    href: '/alerts',
+    label: 'app.alerts' as const,
+    icon: Bell,
+  },
 ]
 const adminNavigation = [
   {
     id: 'overview' as const,
     href: '/overview',
-    label: 'Overview',
+    label: 'app.overview' as const,
     icon: LayoutGrid,
   },
 ]
@@ -77,7 +84,7 @@ async function logout() {
   <!-- Signed in: sidebar on wide screens, top bar on narrow ones. -->
   <div v-if="state === 'in' && me" class="min-h-screen lg:flex">
     <aside
-      class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-gray-150 bg-gray-100/70 lg:flex"
+      class="sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col border-r border-gray-150 bg-gray-100/70 lg:flex"
     >
       <a
         href="/searches"
@@ -88,15 +95,17 @@ async function logout() {
           class="grid size-7 place-items-center rounded-md bg-brand-600 text-white shadow-[0_1px_2px_rgb(15_108_189/0.3)]"
           ><Radar :size="16"
         /></span>
-        <span class="text-sm font-semibold text-gray-900">Ad Monitor</span>
+        <span class="text-sm font-semibold text-gray-900">{{
+          t('app.name')
+        }}</span>
       </a>
 
-      <nav aria-label="Main" class="flex-1 px-3 pt-2">
+      <nav :aria-label="t('app.mainNav')" class="flex-1 px-3 pt-2">
         <template
           v-for="group in me.admin
             ? [
                 { label: '', items: navigation },
-                { label: 'Administration', items: adminNavigation },
+                { label: t('app.administration'), items: adminNavigation },
               ]
             : [{ label: '', items: navigation }]"
           :key="group.label"
@@ -115,7 +124,7 @@ async function logout() {
             class="relative mb-0.5 flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm transition-colors duration-100"
             :class="
               tab === item.id
-                ? 'bg-white font-medium text-gray-900 shadow-card'
+                ? 'bg-raised font-medium text-gray-900 shadow-card'
                 : 'text-gray-700 hover:bg-gray-150/70 hover:text-gray-900'
             "
             @click="onLinkClick($event, item.href)"
@@ -129,7 +138,7 @@ async function logout() {
               :is="item.icon"
               :size="18"
               :class="tab === item.id ? 'text-brand-600' : 'text-gray-500'"
-            />{{ item.label }}
+            />{{ t(item.label) }}
           </a>
         </template>
       </nav>
@@ -145,13 +154,14 @@ async function logout() {
             {{ me.name }}
           </p>
           <p class="text-xs text-gray-500">
-            {{ me.admin ? 'Administrator' : 'Member' }}
+            {{ me.admin ? t('app.administrator') : t('app.member') }}
           </p>
         </div>
+        <PreferencesMenu placement="up" />
         <button
-          class="btn-icon"
-          aria-label="Sign out"
-          title="Sign out"
+          class="btn-icon -ml-1"
+          :aria-label="t('app.signOut')"
+          :title="t('app.signOut')"
           @click="logout"
         >
           <LogOut :size="16" />
@@ -160,24 +170,28 @@ async function logout() {
     </aside>
 
     <header
-      class="sticky top-0 z-10 border-b border-gray-150 bg-white/90 backdrop-blur-md lg:hidden"
+      class="sticky top-0 z-10 border-b border-gray-150 bg-surface/90 backdrop-blur-md lg:hidden"
     >
       <div class="flex h-14 items-center gap-2.5 px-4">
         <span
           class="grid size-7 place-items-center rounded-md bg-brand-600 text-white"
           ><Radar :size="16"
         /></span>
-        <span class="flex-1 text-sm font-semibold">Ad Monitor</span>
+        <span class="flex-1 text-sm font-semibold">{{ t('app.name') }}</span>
+        <PreferencesMenu />
         <button
           class="btn-icon"
-          aria-label="Sign out"
-          title="Sign out"
+          :aria-label="t('app.signOut')"
+          :title="t('app.signOut')"
           @click="logout"
         >
           <LogOut :size="16" />
         </button>
       </div>
-      <nav aria-label="Main" class="flex gap-5 overflow-x-auto px-4">
+      <nav
+        :aria-label="t('app.mainNav')"
+        class="flex gap-5 overflow-x-auto px-4"
+      >
         <a
           v-for="item in me.admin
             ? [...navigation, ...adminNavigation]
@@ -193,7 +207,7 @@ async function logout() {
           "
           @click="onLinkClick($event, item.href)"
         >
-          {{ item.label }}
+          {{ t(item.label) }}
           <span
             v-if="tab === item.id"
             class="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-brand-600"
@@ -223,26 +237,29 @@ async function logout() {
       v-if="state === 'loading'"
       class="size-6 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600"
       role="status"
-      aria-label="Loading"
+      :aria-label="t('common.loading')"
     />
 
     <div v-else class="w-full max-w-[400px]">
+      <div class="fixed top-3 right-3">
+        <PreferencesMenu />
+      </div>
       <div class="mb-6 flex items-center justify-center gap-2.5">
         <span
           class="grid size-8 place-items-center rounded-lg bg-brand-600 text-white shadow-[0_1px_2px_rgb(15_108_189/0.3)]"
           ><Radar :size="18"
         /></span>
-        <span class="text-base font-semibold">Ad Monitor</span>
+        <span class="text-base font-semibold">{{ t('app.name') }}</span>
       </div>
 
       <section v-if="state === 'out'" class="card p-8">
-        <h1 class="text-title font-semibold">Sign in</h1>
+        <h1 class="text-title font-semibold">{{ t('signIn.title') }}</h1>
         <p class="mt-1 text-sm text-gray-600">
-          Sign-in goes through Discord, so there is no password to remember.
+          {{ t('signIn.lead') }}
         </p>
         <div v-if="expired" role="alert" class="message-bar-warning mt-5">
           <TriangleAlert :size="16" class="mt-0.5 shrink-0 text-warning-600" />
-          That sign-in link has expired or was already used.
+          {{ t('signIn.expired') }}
         </div>
         <ol class="mt-6 grid gap-4 text-sm">
           <li class="flex gap-3">
@@ -251,8 +268,9 @@ async function logout() {
               >1</span
             >
             <span class="pt-0.5 text-gray-700"
-              >Type <span class="kbd">/dashboard</span> in a server where the
-              bot is.</span
+              >{{ t('signIn.step1Before') }}
+              <span class="kbd">/dashboard</span>
+              {{ t('signIn.step1After') }}</span
             >
           </li>
           <li class="flex gap-3">
@@ -260,13 +278,11 @@ async function logout() {
               class="grid size-6 shrink-0 place-items-center rounded-full bg-gray-100 text-xs font-semibold text-gray-700"
               >2</span
             >
-            <span class="pt-0.5 text-gray-700"
-              >Open the link the bot sends you.</span
-            >
+            <span class="pt-0.5 text-gray-700">{{ t('signIn.step2') }}</span>
           </li>
         </ol>
         <p class="mt-6 border-t border-gray-150 pt-4 text-xs text-gray-500">
-          Each link works once and expires after 10 minutes.
+          {{ t('signIn.footnote') }}
         </p>
       </section>
 
@@ -275,13 +291,12 @@ async function logout() {
           class="mx-auto mb-4 grid size-10 place-items-center rounded-full bg-danger-50 text-danger-600"
           ><CircleAlert :size="20"
         /></span>
-        <h1 class="text-base font-semibold">Can't reach the server</h1>
+        <h1 class="text-base font-semibold">{{ t('down.title') }}</h1>
         <p class="mt-1 text-sm text-gray-600">
-          The dashboard couldn't connect to its API. Check that it's running,
-          then try again.
+          {{ t('down.body') }}
         </p>
         <button class="btn-secondary mt-6" @click="reload">
-          <RefreshCw :size="14" />Try again
+          <RefreshCw :size="14" />{{ t('common.tryAgain') }}
         </button>
       </section>
     </div>

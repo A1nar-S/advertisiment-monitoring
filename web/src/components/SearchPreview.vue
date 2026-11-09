@@ -14,6 +14,7 @@ import {
   type Filters,
   type Preview,
 } from '../api'
+import { fieldLabel, formatDate, t, tKey } from '../i18n'
 
 // Which already collected ads the search, as it is being edited, would have
 // matched. Re-checked a moment after each change; nothing is saved or sent.
@@ -46,9 +47,7 @@ async function run() {
     if (reason instanceof DOMException && reason.name === 'AbortError') return
     preview.value = null
     error.value =
-      reason instanceof ApiError
-        ? reason.message
-        : 'Could not check the collected ads.'
+      reason instanceof ApiError ? reason.message : t('preview.failed')
   }
   loading.value = false
   emit('result', preview.value)
@@ -68,23 +67,28 @@ onBeforeUnmount(() => {
 })
 
 const label = (key: string) =>
-  props.fields.find((f) => f.key === key)?.label ?? key
+  fieldLabel(key, props.fields.find((f) => f.key === key)?.label ?? key)
 const unsureLabels = computed(() =>
   (preview.value?.unsureKeys ?? []).map(label).join(', '),
 )
 const since = computed(() =>
   preview.value?.since
-    ? new Date(preview.value.since).toLocaleDateString([], {
+    ? formatDate(preview.value.since, {
         day: 'numeric',
         month: 'long',
       })
     : '',
 )
-// "Cars" → "car", for "938 collected car ads".
-const kind = computed(() => props.categoryLabel.toLowerCase().replace(/s$/, ''))
+// The category as an adjective: "938 collected car ads".
+const kind = computed(() =>
+  tKey(
+    `preview.kinds.${props.category}`,
+    props.categoryLabel.toLowerCase().replace(/s$/, ''),
+  ),
+)
 
 function seen(at: string) {
-  return new Date(at).toLocaleString([], {
+  return formatDate(at, {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
@@ -104,30 +108,30 @@ function seen(at: string) {
           class="text-sm text-gray-900"
           aria-live="polite"
         >
-          <span class="font-semibold tabular-nums">{{
-            preview.matched.toLocaleString()
-          }}</span>
-          of {{ preview.inScope.toLocaleString() }} collected {{ kind }} ads
-          match<template v-if="preview.unsure">
-            <span class="text-gray-500">
-              · {{ preview.unsure.toLocaleString() }} more unchecked</span
-            ></template
+          {{
+            t('preview.matchLine', {
+              n: preview.matched,
+              matched: preview.matched,
+              inScope: preview.inScope,
+              kind,
+            })
+          }}<span v-if="preview.unsure" class="text-gray-500">
+            · {{ t('preview.moreUnchecked', { n: preview.unsure }) }}</span
           >
         </p>
         <p v-else-if="preview" class="text-sm text-gray-900">
-          No collected {{ kind }} ads yet
+          {{ t('preview.noneYet', { kind }) }}
         </p>
         <div v-else-if="!error" class="skeleton h-4 w-56" />
-        <p v-if="since" class="mt-0.5 text-xs text-gray-500">
-          From the {{ preview?.scanned.toLocaleString() }} newest ads collected
-          since {{ since }}
+        <p v-if="since && preview" class="mt-0.5 text-xs text-gray-500">
+          {{ t('preview.from', { n: preview.scanned, date: since }) }}
         </p>
       </div>
       <span
         v-if="loading"
         class="mt-0.5 size-4 shrink-0 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600"
         role="status"
-        aria-label="Checking"
+        :aria-label="t('preview.checking')"
       />
     </div>
 
@@ -143,12 +147,9 @@ function seen(at: string) {
         class="flex items-start gap-2.5 border-b border-gray-150 bg-gray-25 px-5 py-3 text-small text-gray-700 sm:px-6"
       >
         <Info :size="16" class="mt-0.5 shrink-0 text-gray-500" />
-        <span
-          >{{ preview.unsure.toLocaleString() }} more match everything the list
-          page shows, but their ad page was never read to check
-          {{ unsureLabels }}. They're marked “Unchecked”. New ads are always
-          checked before you're alerted.</span
-        >
+        <span>{{
+          t('preview.uncheckedNote', { n: preview.unsure, keys: unsureLabels })
+        }}</span>
       </div>
 
       <div
@@ -156,10 +157,11 @@ function seen(at: string) {
         class="flex flex-col items-center px-6 py-10 text-center"
       >
         <SearchX :size="20" class="mb-3 text-gray-400" />
-        <p class="text-sm font-medium text-gray-900">Nothing to check yet</p>
+        <p class="text-sm font-medium text-gray-900">
+          {{ t('preview.nothingTitle') }}
+        </p>
         <p class="mt-1 max-w-sm text-small text-gray-500">
-          ss.com is only read for what someone's search watches, so there's no
-          history here yet. Save the search and new ads start arriving.
+          {{ t('preview.nothingBody') }}
         </p>
       </div>
       <div
@@ -167,10 +169,11 @@ function seen(at: string) {
         class="flex flex-col items-center px-6 py-10 text-center"
       >
         <SearchX :size="20" class="mb-3 text-gray-400" />
-        <p class="text-sm font-medium text-gray-900">No matches</p>
+        <p class="text-sm font-medium text-gray-900">
+          {{ t('preview.noMatchTitle') }}
+        </p>
         <p class="mt-1 max-w-sm text-small text-gray-500">
-          None of the collected ads fit these filters. Try widening one, such as
-          the price or year range.
+          {{ t('preview.noMatchBody') }}
         </p>
       </div>
 
@@ -200,15 +203,18 @@ function seen(at: string) {
               <p class="truncate text-sm text-gray-900">{{ ad.title }}</p>
               <p class="mt-0.5 truncate text-xs text-gray-500 tabular-nums">
                 {{
-                  [seen(ad.firstSeen), ad.active ? '' : 'No longer listed']
+                  [
+                    seen(ad.firstSeen),
+                    ad.active ? '' : t('preview.noLongerListed'),
+                  ]
                     .filter(Boolean)
                     .join(' · ')
                 }}
               </p>
             </div>
-            <span v-if="!ad.sure" class="badge-warning hidden sm:inline-flex"
-              >Unchecked</span
-            >
+            <span v-if="!ad.sure" class="badge-warning hidden sm:inline-flex">{{
+              t('preview.unchecked')
+            }}</span>
             <span
               v-if="ad.price"
               class="shrink-0 text-sm font-semibold text-gray-900 tabular-nums"
@@ -226,8 +232,12 @@ function seen(at: string) {
         v-if="preview.ads.length < preview.matched + preview.unsure"
         class="border-t border-gray-150 px-5 py-2.5 text-xs text-gray-500 sm:px-6"
       >
-        Showing the newest {{ preview.ads.length }} of
-        {{ (preview.matched + preview.unsure).toLocaleString() }}.
+        {{
+          t('preview.showing', {
+            shown: preview.ads.length,
+            total: preview.matched + preview.unsure,
+          })
+        }}
       </p>
     </template>
   </div>

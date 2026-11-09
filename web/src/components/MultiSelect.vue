@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
+import { t } from '../i18n'
 
 // A searchable multi-select with chips. Typing filters the options (case and
 // Latvian diacritics do not matter); Enter adds the first match, or the text
@@ -99,7 +100,7 @@ function move(step: number) {
         }}<button
           type="button"
           class="grid size-5 place-items-center rounded-sm text-gray-500 hover:bg-gray-200 hover:text-gray-900"
-          :aria-label="`Remove ${value}`"
+          :aria-label="t('multiSelect.remove', { value })"
           @click="remove(value)"
         >
           <X :size="12" /></button
@@ -126,7 +127,7 @@ function move(step: number) {
     <ul
       v-if="listShown"
       role="listbox"
-      class="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg bg-white p-1 shadow-raised"
+      class="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg bg-surface p-1 shadow-raised"
     >
       <li
         v-for="(option, index) in matches"
@@ -146,8 +147,7 @@ function move(step: number) {
         :class="{ 'mt-1 border-t border-gray-100': matches.length }"
         @mousedown.prevent="add(query)"
       >
-        Use “<span class="text-gray-900">{{ query.trim() }}</span
-        >”
+        {{ t('multiSelect.useTyped', { value: query.trim() }) }}
       </li>
     </ul>
   </div>
