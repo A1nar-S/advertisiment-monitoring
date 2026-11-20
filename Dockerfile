@@ -1,7 +1,7 @@
 # One image recipe for every service: docker build --build-arg CMD=scraper .
 
 # The dashboard (served by the api service); small, so every image carries it.
-FROM oven/bun:1.3.14 AS web
+FROM oven/bun:1.4.4 AS web
 WORKDIR /web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
