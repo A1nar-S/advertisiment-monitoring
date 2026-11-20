@@ -24,7 +24,7 @@ x-service: &service
 
 services:
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:8.4.0
     container_name: kafka
     hostname: kafka
     restart: unless-stopped
@@ -66,7 +66,7 @@ services:
   # kept 30 days (see `make dlq`). With NAMESPACE set, services use <ns>.<topic>
   # and the namespaced .dlq topic is auto-created (1 partition).
   kafka-init:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:8.4.0
     depends_on:
       kafka: {condition: service_healthy}
     restart: "no"
