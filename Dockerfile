@@ -8,7 +8,7 @@ RUN bun install --frozen-lockfile
 COPY web/ ./
 RUN bun run build
 
-FROM golang:1.26 AS build
+FROM golang:1.27 AS build
 ARG CMD
 WORKDIR /src
 COPY go.mod go.sum ./
